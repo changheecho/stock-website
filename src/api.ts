@@ -1,4 +1,4 @@
-import type { AccountView, Environment, OrderReceipt, OrderStatus, StockQuote, StockSearchItem } from './types'
+import type { AccountView, Environment, OrderReceipt, OrderStatus, StockQuote, StockSearchItem, TradeSide } from './types'
 
 type ApiRecord = Record<string, unknown>
 const number = (value: unknown) => Number(String(value ?? '0').replaceAll(',', '').replace(/^\+/, '')) || 0
@@ -86,13 +86,13 @@ export const fetchStockQuote = (environment: Exclude<Environment, 'live'>, stock
   return apiJson<StockQuote>(`/api/trade/quote?${params}`)
 }
 
-export const placeBuyOrder = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, quantity: number, price: number, requestId: string) =>
+export const placeTradeOrder = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, side: TradeSide, quantity: number, price: number, requestId: string) =>
   apiJson<OrderReceipt>('/api/trade/orders', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ environment, code: stock.code, exchange: stock.market, quantity, price, requestId }),
+    body: JSON.stringify({ environment, code: stock.code, exchange: stock.market, side, quantity, price, requestId }),
   })
 
-export const fetchOrderStatus = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, orderNo: string) => {
-  const params = new URLSearchParams({ environment, code: stock.code, exchange: stock.market, orderNo })
+export const fetchOrderStatus = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, side: TradeSide, orderNo: string) => {
+  const params = new URLSearchParams({ environment, code: stock.code, exchange: stock.market, side, orderNo })
   return apiJson<OrderStatus>(`/api/trade/order-status?${params}`)
 }

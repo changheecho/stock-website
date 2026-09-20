@@ -1,5 +1,7 @@
 export type Environment = 'live' | 'domestic-mock' | 'overseas-mock'
 export type Feature = 'account' | 'stock-search'
+export type TradeSide = 'buy' | 'sell'
+export type TradeSelection = { stock: StockSearchItem; side: TradeSide; availableQuantity?: number }
 
 export type StockSearchItem = {
   code: string

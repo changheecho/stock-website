@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, ShieldCheck, ShoppingCart, X } from 'lucide-react'
-import { fetchOrderStatus, fetchStockQuote, placeBuyOrder } from './api'
-import type { Environment, StockSearchItem } from './types'
+import { fetchOrderStatus, fetchStockQuote, placeTradeOrder } from './api'
+import type { Environment, TradeSelection } from './types'
 
 type Props = {
   environment: Exclude<Environment, 'live'>
-  stock: StockSearchItem | null
+  selection: TradeSelection | null
   onClose: () => void
 }
 
@@ -14,7 +14,10 @@ const money = (value: number, currency: 'KRW' | 'USD') => new Intl.NumberFormat(
   style: 'currency', currency, maximumFractionDigits: currency === 'KRW' ? 0 : 4,
 }).format(value)
 
-export default function StockTradePanel({ environment, stock, onClose }: Props) {
+export default function StockTradePanel({ environment, selection, onClose }: Props) {
+  const stock = selection?.stock ?? null
+  const side = selection?.side ?? 'buy'
+  const isSell = side === 'sell'
   const [quantity, setQuantity] = useState('1')
   const [price, setPrice] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -30,12 +33,12 @@ export default function StockTradePanel({ environment, stock, onClose }: Props) 
   })
   const orderStatus = useQuery({
     queryKey: ['order-status', environment, stock?.code, receipt?.orderNo],
-    queryFn: () => fetchOrderStatus(environment, stock!, receipt!.orderNo),
+    queryFn: () => fetchOrderStatus(environment, stock!, side, receipt!.orderNo),
     enabled: Boolean(stock && receipt),
     refetchInterval: (query) => query.state.data?.state === 'filled' ? false : 3_000,
   })
   const order = useMutation({
-    mutationFn: () => placeBuyOrder(environment, stock!, Number(quantity), Number(price), requestId.current),
+    mutationFn: () => placeTradeOrder(environment, stock!, side, Number(quantity), Number(price), requestId.current),
     onSuccess: (data) => {
       setReceipt(data)
       setConfirming(false)
@@ -51,7 +54,7 @@ export default function StockTradePanel({ environment, stock, onClose }: Props) 
 
   useEffect(() => {
     setQuantity('1'); setPrice(''); setConfirming(false); setReceipt(null); setNotice(null); requestId.current = ''
-  }, [stock?.code, environment])
+  }, [stock?.code, environment, side])
   useEffect(() => {
     if (quote.data?.currentPrice && !price) setPrice(String(quote.data.currentPrice))
   }, [quote.data?.currentPrice, price])
@@ -62,7 +65,8 @@ export default function StockTradePanel({ environment, stock, onClose }: Props) 
   }, [notice])
 
   const total = useMemo(() => Number(quantity || 0) * Number(price || 0), [quantity, price])
-  const valid = Number.isInteger(Number(quantity)) && Number(quantity) > 0 && Number(price) > 0
+  const validQuantity = Number.isInteger(Number(quantity)) && Number(quantity) > 0 && (!isSell || Number(quantity) <= (selection?.availableQuantity ?? 0))
+  const valid = validQuantity && Number(price) > 0
   if (!stock) return null
 
   const startConfirmation = () => {
@@ -82,14 +86,16 @@ export default function StockTradePanel({ environment, stock, onClose }: Props) 
         <section className="quote-summary"><div><span>현재가</span><strong>{money(quote.data.currentPrice, quote.data.currency)}</strong><small className={quote.data.change >= 0 ? 'positive' : 'negative'}>{quote.data.change >= 0 ? '+' : ''}{money(quote.data.change, quote.data.currency)} ({quote.data.changeRate >= 0 ? '+' : ''}{quote.data.changeRate.toFixed(2)}%)</small></div><dl><div><dt>고가</dt><dd>{money(quote.data.high, quote.data.currency)}</dd></div><div><dt>저가</dt><dd>{money(quote.data.low, quote.data.currency)}</dd></div><div><dt>거래량</dt><dd>{quote.data.volume.toLocaleString('ko-KR')}</dd></div></dl></section>
 
         {!quote.data.canBuy ? <div className="buy-unavailable"><AlertTriangle size={20} /><div><b>매수할 수 없는 종목입니다</b><span>{quote.data.unavailableReason}</span></div></div> : <section className="buy-form">
-          <div className="buy-title"><div><ShoppingCart size={18} /><b>지정가 매수</b></div><span>모의투자</span></div>
-          <label>주문 수량<div className="input-with-unit"><input type="number" min="1" step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} disabled={Boolean(receipt)} /><span>주</span></div></label>
+          <div className="buy-title"><div><ShoppingCart size={18} /><b>지정가 {isSell ? '매도' : '매수'}</b></div><span>모의투자</span></div>
+          {isSell && <div className="available-quantity"><span>매도 가능 수량</span><strong>{selection?.availableQuantity?.toLocaleString('ko-KR') ?? 0}주</strong></div>}
+          <label>주문 수량<div className="input-with-unit"><input type="number" min="1" max={isSell ? selection?.availableQuantity : undefined} step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} disabled={Boolean(receipt)} /><span>주</span></div></label>
+          {isSell && Number(quantity) > (selection?.availableQuantity ?? 0) && <p className="quantity-error">매도 가능 수량을 초과할 수 없습니다.</p>}
           <label>주문 가격<div className="input-with-unit"><input type="number" min={quote.data.currency === 'KRW' ? '1' : '0.0001'} step={quote.data.currency === 'KRW' ? '1' : '0.0001'} value={price} onChange={(event) => setPrice(event.target.value)} disabled={Boolean(receipt)} /><span>{quote.data.currency}</span></div></label>
           <div className="order-total"><span>예상 주문금액</span><strong>{money(total, quote.data.currency)}</strong></div>
-          {!receipt && <button className="buy-button" disabled={!valid || order.isPending} onClick={startConfirmation}>매수 주문 확인</button>}
+          {!receipt && <button className={`buy-button ${isSell ? 'sell' : ''}`} disabled={!valid || order.isPending} onClick={startConfirmation}>{isSell ? '매도' : '매수'} 주문 확인</button>}
         </section>}
 
-        {confirming && <section className="confirm-box"><div><ShieldCheck size={22} /><b>주문 내용을 최종 확인해 주세요</b><p>{stock.name} {Number(quantity).toLocaleString()}주를 주당 {money(Number(price), quote.data.currency)}에 매수합니다.</p><strong>총 {money(total, quote.data.currency)}</strong></div><div className="confirm-actions"><button onClick={() => { setConfirming(false); requestId.current = '' }} disabled={order.isPending}>취소</button><button onClick={() => order.mutate()} disabled={order.isPending}>{order.isPending ? <><LoaderCircle className="spin" size={16} /> 주문 처리 중</> : '모의 매수 주문'}</button></div></section>}
+        {confirming && <section className="confirm-box"><div><ShieldCheck size={22} /><b>주문 내용을 최종 확인해 주세요</b><p>{stock.name} {Number(quantity).toLocaleString()}주를 주당 {money(Number(price), quote.data.currency)}에 {isSell ? '매도' : '매수'}합니다.{isSell && ' 주문 직전에 최신 매도 가능 수량을 다시 확인합니다.'}</p><strong>총 {money(total, quote.data.currency)}</strong></div><div className="confirm-actions"><button onClick={() => { setConfirming(false); requestId.current = '' }} disabled={order.isPending}>취소</button><button onClick={() => order.mutate()} disabled={order.isPending}>{order.isPending ? <><LoaderCircle className="spin" size={16} /> 주문 처리 중</> : `모의 ${isSell ? '매도' : '매수'} 주문`}</button></div></section>}
 
         {receipt && <section className="order-result"><div className="result-status"><CheckCircle2 size={21} /><div><b>주문 접수 완료</b><span>주문번호 {receipt.orderNo}</span></div></div><div className="fill-status"><span>체결 상태</span>{orderStatus.isLoading ? <b><LoaderCircle className="spin" size={14} /> 확인 중</b> : orderStatus.isError ? <b className="negative">조회 실패</b> : <b className={orderStatus.data?.state === 'filled' ? 'positive' : ''}>{orderStatus.data?.label}</b>}</div>{orderStatus.data && <div className="fill-detail"><span>체결 {orderStatus.data.filledQuantity.toLocaleString()}주</span><span>미체결 {orderStatus.data.remainingQuantity.toLocaleString()}주</span></div>}</section>}
       </>}

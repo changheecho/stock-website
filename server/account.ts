@@ -5,7 +5,7 @@ type SecretConfig = { appkey: string; secretkey: string }
 type CachedToken = { value: string; expiresAt: number }
 type StockItem = { code: string; name: string; englishName?: string; market: string; sector?: string; status?: string; isEtf?: boolean }
 type CachedStocks = { value: StockItem[]; expiresAt: number }
-type OrderRequest = { environment?: string; code?: string; exchange?: string; quantity?: number; price?: number; requestId?: string }
+type OrderRequest = { environment?: string; code?: string; exchange?: string; quantity?: number; price?: number; requestId?: string; side?: 'buy' | 'sell' }
 
 const MOCK_DOMAIN = 'https://mockapi.kiwoom.com'
 const tokenCache = new Map<Environment, CachedToken>()
@@ -192,6 +192,13 @@ const exchangeCode = (market: string) => {
   return null
 }
 
+const resolveExchangeCode = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, market: string) => {
+  const direct = exchangeCode(market)
+  if (direct || environment === 'domestic-mock') return direct
+  const stock = (await queryStocks(env, environment)).find((item) => item.code === code)
+  return stock ? exchangeCode(stock.market) : null
+}
+
 const normalizeNumber = (value: unknown) => Number(String(value ?? '0').split(',').join('').replace(/^\+/, '')) || 0
 
 const getQuote = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, exchange: string) => {
@@ -209,7 +216,7 @@ const getQuote = async (env: NodeJS.ProcessEnv, environment: Environment, code: 
     }
   }
 
-  const stex_tp = exchangeCode(exchange)
+  const stex_tp = await resolveExchangeCode(env, environment, code, exchange)
   if (!stex_tp) return { code, name: '', currency: 'USD', currentPrice: 0, change: 0, changeRate: 0, volume: 0, high: 0, low: 0, canBuy: false, unavailableReason: 'NASDAQ, NYSE, AMEX 종목만 모의 매수를 지원합니다.' }
   const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}/api/us/mrkcond`, {
     method: 'POST', headers: { ...headers, 'api-id': 'usa20100' }, body: JSON.stringify({ stex_tp, stk_cd: code }),
@@ -230,6 +237,7 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
   const requestId = String(body.requestId ?? '')
   const quantity = Number(body.quantity)
   const price = Number(body.price)
+  const side = body.side === 'sell' ? 'sell' : 'buy'
   if (!requestId || !code || !Number.isInteger(quantity) || quantity < 1 || !Number.isFinite(price) || price <= 0) throw new Error('주문 수량과 가격을 확인해 주세요.')
 
   const previous = orderRequests.get(requestId)
@@ -243,18 +251,30 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
     const token = await getToken(env, environment)
     const headers = { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}` }
     const overseas = environment === 'overseas-mock'
-    const stex_tp = overseas ? exchangeCode(String(body.exchange ?? '')) : null
+    const stex_tp = overseas ? await resolveExchangeCode(env, environment, code, String(body.exchange ?? '')) : null
     if (overseas && !stex_tp) throw new Error('이 거래소는 해외 모의투자 주문을 지원하지 않습니다.')
     if (!overseas && !/^\d{6}$/.test(code)) throw new Error('국내 주문은 6자리 종목코드만 지원합니다.')
 
+    if (side === 'sell') {
+      const balance = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/acnt' : '/api/dostk/acnt'}`, {
+        method: 'POST',
+        headers: { ...headers, 'api-id': overseas ? 'ust21070' : 'kt00018' },
+        body: JSON.stringify(overseas ? { stex_tp: stex_tp ?? '', stk_cd: code } : { qry_tp: '1', dmst_stex_tp: 'KRX' }),
+      })
+      const holdings = (overseas ? balance.result_list : balance.acnt_evlt_remn_indv_tot) as Record<string, unknown>[] | undefined
+      const holding = (holdings ?? []).find((item) => String(overseas ? item.stk_cd : item.stk_cd).replace(/^[AJQ]/, '') === code)
+      const availableQuantity = normalizeNumber(overseas ? holding?.sell_alowq : holding?.trde_able_qty)
+      if (availableQuantity < quantity) throw new Error(`최신 매도 가능 수량(${availableQuantity}주)을 초과했습니다.`)
+    }
+
     const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/ordr' : '/api/dostk/ordr'}`, {
       method: 'POST',
-      headers: { ...headers, 'api-id': overseas ? 'ust20000' : 'kt10000' },
+      headers: { ...headers, 'api-id': overseas ? (side === 'sell' ? 'ust20001' : 'ust20000') : (side === 'sell' ? 'kt10001' : 'kt10000') },
       body: JSON.stringify(overseas
-        ? { stex_tp, stk_cd: code, ord_qty: String(quantity), ord_uv: price.toFixed(4), trde_tp: '00' }
+        ? { stex_tp, stk_cd: code, ord_qty: String(quantity), ord_uv: price.toFixed(4), ...(side === 'sell' ? { stop_pric: '' } : {}), trde_tp: '00' }
         : { dmst_stex_tp: 'KRX', stk_cd: code, ord_qty: String(quantity), ord_uv: String(Math.trunc(price)), trde_tp: '0', cond_uv: '' }),
     })
-    const result = { orderNo: String(data.ord_no ?? ''), name: String(data.stk_nm ?? ''), status: 'accepted', message: '모의 매수 주문이 접수되었습니다.' }
+    const result = { orderNo: String(data.ord_no ?? ''), name: String(data.stk_nm ?? ''), status: 'accepted', message: `모의 ${side === 'sell' ? '매도' : '매수'} 주문이 접수되었습니다.` }
     orderRequests.set(requestId, { expiresAt: Date.now() + 10 * 60 * 1000, result })
     return result
   } catch (error) {
@@ -263,13 +283,13 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
   }
 }
 
-const getOrderStatus = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, exchange: string, orderNo: string) => {
+const getOrderStatus = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, exchange: string, orderNo: string, side: 'buy' | 'sell') => {
   const token = await getToken(env, environment)
   const headers = { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}` }
   if (environment === 'domestic-mock') {
     const data = await requestKiwoom<{ acnt_ord_cntr_prps_dtl?: Record<string, unknown>[] }>(`${MOCK_DOMAIN}/api/dostk/acnt`, {
       method: 'POST', headers: { ...headers, 'api-id': 'kt00007' },
-      body: JSON.stringify({ ord_dt: '', qry_tp: '1', stk_bond_tp: '1', sell_tp: '2', stk_cd: code, fr_ord_no: '', dmst_stex_tp: 'KRX' }),
+      body: JSON.stringify({ ord_dt: '', qry_tp: '1', stk_bond_tp: '1', sell_tp: side === 'sell' ? '1' : '2', stk_cd: code, fr_ord_no: '', dmst_stex_tp: 'KRX' }),
     })
     const item = (data.acnt_ord_cntr_prps_dtl ?? []).find((row) => String(row.ord_no ?? '').replace(/^0+/, '') === orderNo.replace(/^0+/, ''))
     if (!item) return { state: 'checking', label: '주문 내역 확인 중', filledQuantity: 0, remainingQuantity: 0 }
@@ -278,10 +298,10 @@ const getOrderStatus = async (env: NodeJS.ProcessEnv, environment: Environment, 
     return { state: remainingQuantity === 0 && filledQuantity > 0 ? 'filled' : 'pending', label: remainingQuantity === 0 && filledQuantity > 0 ? '체결 완료' : String(item.acpt_tp ?? '접수'), filledQuantity, remainingQuantity, filledPrice: normalizeNumber(item.cntr_uv) }
   }
 
-  const stex_tp = exchangeCode(exchange)
+  const stex_tp = await resolveExchangeCode(env, environment, code, exchange)
   if (!stex_tp) throw new Error('지원하지 않는 해외 거래소입니다.')
   const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}/api/us/acnt`, {
-    method: 'POST', headers: { ...headers, 'api-id': 'ust21510' }, body: JSON.stringify({ slby_tp: '2', stex_tp, stk_cd: code }),
+    method: 'POST', headers: { ...headers, 'api-id': 'ust21510' }, body: JSON.stringify({ slby_tp: side === 'sell' ? '1' : '2', stex_tp, stk_cd: code }),
   })
   const list = ((data.result_list ?? data.result_lsit) as Record<string, unknown>[] | undefined) ?? []
   const item = list.find((row) => String(row.ord_no ?? '').replace(/^0+/, '') === orderNo.replace(/^0+/, ''))
@@ -304,7 +324,7 @@ export const createTradingHandler = (env: NodeJS.ProcessEnv) => async (request: 
     if (request.method === 'GET' && url.pathname === '/order-status') {
       const environment = url.searchParams.get('environment')
       if (environment !== 'domestic-mock' && environment !== 'overseas-mock') return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
-      return sendJson(response, 200, await getOrderStatus(env, environment, url.searchParams.get('code') ?? '', url.searchParams.get('exchange') ?? '', url.searchParams.get('orderNo') ?? ''))
+      return sendJson(response, 200, await getOrderStatus(env, environment, url.searchParams.get('code') ?? '', url.searchParams.get('exchange') ?? '', url.searchParams.get('orderNo') ?? '', url.searchParams.get('side') === 'sell' ? 'sell' : 'buy'))
     }
     return sendJson(response, 404, { message: '요청한 거래 경로를 찾을 수 없습니다.' })
   } catch (error) {

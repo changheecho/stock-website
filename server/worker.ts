@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createAccountHandler, createRankingHandler, createStockSearchHandler, createTradingHandler } from './account.ts'
+export { setExternalApiLogSink } from './account.ts'
 
 type WorkerEnvironment = NodeJS.ProcessEnv & {
   ASSETS?: { fetch(request: Request): Promise<Response> }

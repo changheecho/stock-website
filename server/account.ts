@@ -6,11 +6,46 @@ type CachedToken = { value: string; expiresAt: number }
 type StockItem = { code: string; name: string; englishName?: string; market: string; sector?: string; status?: string; isEtf?: boolean }
 type CachedStocks = { value: StockItem[]; expiresAt: number }
 type OrderRequest = { environment?: string; code?: string; exchange?: string; quantity?: number; price?: number; requestId?: string; side?: 'buy' | 'sell' }
+type ExternalApiLogEntry = Record<string, unknown>
+type ExternalApiLogSink = (entry: ExternalApiLogEntry) => void | Promise<void>
 
 const MOCK_DOMAIN = 'https://mockapi.kiwoom.com'
 const tokenCache = new Map<Environment, CachedToken>()
 const stockCache = new Map<Environment, CachedStocks>()
 const orderRequests = new Map<string, { expiresAt: number; result?: unknown }>()
+let externalApiLogSink: ExternalApiLogSink = (entry) => console.log(JSON.stringify(entry))
+
+export const setExternalApiLogSink = (sink: ExternalApiLogSink) => {
+  externalApiLogSink = sink
+}
+
+const sensitiveField = /(?:authorization|token|secret|password|passwd|pwd|app[_-]?key|secret[_-]?key|access[_-]?key)/i
+
+const redactSensitive = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(redactSensitive)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+    key,
+    sensitiveField.test(key) ? '[REDACTED]' : redactSensitive(item),
+  ]))
+}
+
+const parseLogBody = (body: BodyInit | null | undefined) => {
+  if (typeof body !== 'string') return body ? '[NON_TEXT_BODY]' : undefined
+  try {
+    return redactSensitive(JSON.parse(body))
+  } catch {
+    return '[NON_JSON_BODY]'
+  }
+}
+
+const writeExternalApiLog = (entry: ExternalApiLogEntry) => {
+  try {
+    void Promise.resolve(externalApiLogSink(entry)).catch(() => undefined)
+  } catch {
+    // Logging must never affect the API request.
+  }
+}
 
 const sendJson = (response: ServerResponse, status: number, body: unknown) => {
   response.statusCode = status
@@ -28,12 +63,54 @@ const getConfig = (env: NodeJS.ProcessEnv, environment: Environment): SecretConf
 }
 
 const requestKiwoom = async <T>(url: string, init: RequestInit): Promise<T> => {
-  const response = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) })
-  const data = (await response.json()) as T & { return_code?: number; return_msg?: string }
-  if (!response.ok || (typeof data.return_code === 'number' && data.return_code !== 0)) {
-    throw new Error(data.return_msg || `키움 API 요청에 실패했습니다. (${response.status})`)
+  const requestId = crypto.randomUUID()
+  const startedAt = Date.now()
+  let responseLogged = false
+  const headers: Record<string, string> = {}
+  new Headers(init.headers).forEach((value, key) => { headers[key] = value })
+  writeExternalApiLog({
+    timestamp: new Date(startedAt).toISOString(),
+    level: 'info',
+    event: 'external_api_request',
+    requestId,
+    service: 'kiwoom',
+    method: init.method ?? 'GET',
+    url,
+    headers: redactSensitive(headers),
+    body: parseLogBody(init.body),
+  })
+
+  try {
+    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(15_000) })
+    const data = (await response.json()) as T & { return_code?: number; return_msg?: string }
+    const succeeded = response.ok && !(typeof data.return_code === 'number' && data.return_code !== 0)
+    writeExternalApiLog({
+      timestamp: new Date().toISOString(),
+      level: succeeded ? 'info' : 'error',
+      event: succeeded ? 'external_api_response_success' : 'external_api_response_failure',
+      requestId,
+      service: 'kiwoom',
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      body: redactSensitive(data),
+    })
+    responseLogged = true
+    if (!succeeded) throw new Error(data.return_msg || `키움 API 요청에 실패했습니다. (${response.status})`)
+    return data
+  } catch (error) {
+    if (!responseLogged) {
+      writeExternalApiLog({
+        timestamp: new Date().toISOString(),
+        level: 'error',
+        event: 'external_api_response_failure',
+        requestId,
+        service: 'kiwoom',
+        durationMs: Date.now() - startedAt,
+        error: { name: error instanceof Error ? error.name : 'UnknownError', message: error instanceof Error ? error.message : '외부 API 요청 실패' },
+      })
+    }
+    throw error
   }
-  return data
 }
 
 const getToken = async (env: NodeJS.ProcessEnv, environment: Environment) => {

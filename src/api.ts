@@ -1,4 +1,4 @@
-import type { AccountView, Environment, OrderReceipt, OrderStatus, StockQuote, StockSearchItem, TradeSide } from './types'
+import type { AccountView, Environment, OrderReceipt, OrderStatus, RankingsData, StockQuote, StockSearchItem, TradeSide } from './types'
 
 type ApiRecord = Record<string, unknown>
 const number = (value: unknown) => Number(String(value ?? '0').replaceAll(',', '').replace(/^\+/, '')) || 0
@@ -96,3 +96,6 @@ export const fetchOrderStatus = (environment: Exclude<Environment, 'live'>, stoc
   const params = new URLSearchParams({ environment, code: stock.code, exchange: stock.market, side, orderNo })
   return apiJson<OrderStatus>(`/api/trade/order-status?${params}`)
 }
+
+export const fetchRankings = (environment: Exclude<Environment, 'live'>) =>
+  apiJson<RankingsData>(`/api/rankings?${new URLSearchParams({ environment })}`)

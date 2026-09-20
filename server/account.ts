@@ -173,15 +173,17 @@ export const createStockSearchHandler = (env: NodeJS.ProcessEnv) => async (
 }
 
 const readJsonBody = async (request: IncomingMessage): Promise<OrderRequest> => {
-  const chunks: Buffer[] = []
+  const decoder = new TextDecoder()
+  let text = ''
   let size = 0
   for await (const chunk of request) {
-    const buffer = Buffer.from(chunk)
-    size += buffer.length
+    const bytes = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : new Uint8Array(chunk)
+    size += bytes.byteLength
     if (size > 16_384) throw new Error('요청 데이터가 너무 큽니다.')
-    chunks.push(buffer)
+    text += decoder.decode(bytes, { stream: true })
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as OrderRequest
+  text += decoder.decode()
+  return JSON.parse(text) as OrderRequest
 }
 
 const exchangeCode = (market: string) => {
@@ -330,5 +332,61 @@ export const createTradingHandler = (env: NodeJS.ProcessEnv) => async (request: 
   } catch (error) {
     const message = error instanceof Error ? error.message : '거래 요청을 처리하지 못했습니다.'
     sendJson(response, 502, { message })
+  }
+}
+
+type RankingKind = 'value' | 'gainers' | 'volume' | 'popular'
+type RankingItem = { rank: number; code: string; name: string; englishName?: string; market: string; price: number; changeRate: number; metric: number; metricLabel: string }
+
+const rankingList = (data: Record<string, unknown>, key: string) => ((data[key] as Record<string, unknown>[] | undefined) ?? [])
+
+const queryRankings = async (env: NodeJS.ProcessEnv, environment: Environment) => {
+  const token = await getToken(env, environment)
+  const overseas = environment === 'overseas-mock'
+  const rankingUrl = `${MOCK_DOMAIN}${overseas ? '/api/us/rkinfo' : '/api/dostk/rkinfo'}`
+  const request = (apiId: string, body: Record<string, string>, url = rankingUrl) => requestKiwoom<Record<string, unknown>>(url, {
+    method: 'POST', headers: { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': apiId }, body: JSON.stringify(body),
+  })
+
+  const responses = await Promise.all(overseas ? [
+    request('usa20540', { stex_tp: '0', inds_cd: '', stk_tp: '0', trde_qty_tp: '0', stk_cnd: '0', pric_cnd: '0', trde_prica_cnd: '0' }),
+    request('usa20510', { stex_tp: '0', inds_cd: '', stk_tp: '0', stk_cnd: '0', tm: '1', trde_qty_tp: '0', pric_cnd: '0', trde_prica_cnd: '0' }),
+    request('usa20530', { stex_tp: '0', inds_cd: '', stk_tp: '0', trde_qty_tp: '0', qry_tp: '0', stk_cnd: '0', pric_cnd: '0', trde_prica_cnd: '0' }),
+    request('usa01980', { svc_type: 'B281' }),
+  ] : [
+    request('ka10032', { mrkt_tp: '000', mang_stk_incls: '0', stex_tp: '1' }),
+    request('ka10027', { mrkt_tp: '000', sort_tp: '1', trde_qty_cnd: '0000', stk_cnd: '0', crd_cnd: '0', updown_incls: '1', pric_cnd: '0', trde_prica_cnd: '0', stex_tp: '1' }),
+    request('ka10030', { mrkt_tp: '000', sort_tp: '1', mang_stk_incls: '0', crd_tp: '0', trde_qty_tp: '0', pric_tp: '0', trde_prica_tp: '0', mrkt_open_tp: '0', stex_tp: '1' }),
+    request('ka00198', { qry_tp: '1' }, `${MOCK_DOMAIN}/api/dostk/stkinfo`),
+  ])
+
+  const kinds: RankingKind[] = ['value', 'gainers', 'volume', 'popular']
+  const keys = overseas ? ['result_list', 'result_list', 'result_list', 'result_list'] : ['trde_prica_upper', 'pred_pre_flu_rt_upper', 'tdy_trde_qty_upper', 'item_inq_rank']
+  return Object.fromEntries(kinds.map((kind, index) => {
+    const rows = rankingList(responses[index], keys[index]).slice(0, 10)
+    const items: RankingItem[] = rows.map((item, rowIndex) => ({
+      rank: normalizeNumber(item.rank ?? item.now_rank ?? item.bigd_rank) || rowIndex + 1,
+      code: String(item.stk_cd ?? '').replace(/^[AJQ]/, ''),
+      name: String(item.stk_nm ?? ''),
+      englishName: overseas ? String(item.stk_enm ?? '') : undefined,
+      market: overseas ? String(item.stex_tp ?? '') : 'KRX',
+      price: Math.abs(normalizeNumber(item.cur_prc ?? item.curr_pric ?? item.past_curr_prc)),
+      changeRate: normalizeNumber(item.flu_rt ?? item.diff_rate_for_gjga ?? item.base_comp_chgr),
+      metric: kind === 'value' ? normalizeNumber(item.trde_prica) : kind === 'volume' ? normalizeNumber(item.acc_trde_qty ?? item.trde_qty) : kind === 'popular' ? normalizeNumber(item.rank_chg ?? item.chg_val) : normalizeNumber(item.flu_rt),
+      metricLabel: kind === 'value' ? '거래대금' : kind === 'volume' ? '거래량' : kind === 'popular' ? '순위 변화' : '등락률',
+    }))
+    return [kind, items]
+  }))
+}
+
+export const createRankingHandler = (env: NodeJS.ProcessEnv) => async (request: IncomingMessage, response: ServerResponse) => {
+  if (request.method !== 'GET') return sendJson(response, 405, { message: '지원하지 않는 요청입니다.' })
+  const url = new URL(request.url || '/', 'http://localhost')
+  const environment = url.searchParams.get('environment')
+  if (environment !== 'domestic-mock' && environment !== 'overseas-mock') return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
+  try {
+    sendJson(response, 200, await queryRankings(env, environment))
+  } catch (error) {
+    sendJson(response, 502, { message: error instanceof Error ? error.message : '순위 정보를 불러오지 못했습니다.' })
   }
 }

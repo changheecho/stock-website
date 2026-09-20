@@ -1,5 +1,5 @@
 export type Environment = 'live' | 'domestic-mock' | 'overseas-mock'
-export type Feature = 'account' | 'stock-search'
+export type Feature = 'account' | 'stock-search' | 'rankings'
 export type TradeSide = 'buy' | 'sell'
 export type TradeSelection = { stock: StockSearchItem; side: TradeSide; availableQuantity?: number }
 
@@ -30,6 +30,9 @@ export type StockQuote = {
 
 export type OrderReceipt = { orderNo: string; name: string; status: 'accepted'; message: string }
 export type OrderStatus = { state: 'checking' | 'pending' | 'filled'; label: string; filledQuantity: number; remainingQuantity: number; filledPrice?: number }
+
+export type RankingItem = { rank: number; code: string; name: string; englishName?: string; market: string; price: number; changeRate: number; metric: number; metricLabel: string }
+export type RankingsData = { value: RankingItem[]; gainers: RankingItem[]; volume: RankingItem[]; popular: RankingItem[] }
 
 export type Holding = {
   code: string

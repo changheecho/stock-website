@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, BriefcaseBusiness, ChevronRight,
-  CircleDollarSign, Clock3, Menu, RefreshCw, Search, ShieldCheck, WalletCards, X,
+  CircleDollarSign, Clock3, ListOrdered, Menu, RefreshCw, Search, ShieldCheck, WalletCards, X,
 } from 'lucide-react'
 import { fetchAccount } from './api'
 import StockSearch from './StockSearch'
 import StockTradePanel from './StockTradePanel'
+import Rankings from './Rankings'
 import type { AccountView, Environment, Feature, Holding, StockSearchItem, TradeSelection } from './types'
 
 const environments: { id: Environment; label: string; detail: string; disabled?: boolean }[] = [
@@ -104,11 +105,12 @@ function App() {
       <nav><p>투자 관리</p>
         <button className={feature === 'account' ? 'active' : ''} onClick={() => setFeature('account')}><WalletCards size={19} /><span>계좌 확인</span><ChevronRight size={16} /></button>
         <button className={feature === 'stock-search' ? 'active' : ''} onClick={() => setFeature('stock-search')}><Search size={19} /><span>종목 검색</span><ChevronRight size={16} /></button>
+        <button className={feature === 'rankings' ? 'active' : ''} onClick={() => setFeature('rankings')}><ListOrdered size={19} /><span>순위</span><ChevronRight size={16} /></button>
       </nav>
       <div className="security-note"><ShieldCheck size={20} /><div><b>보안 연결</b><span>인증정보는 서버에서만 사용됩니다.</span></div></div>
     </aside>
 
-    <main>{feature === 'stock-search' ? <StockSearch environment={environment} onSelectStock={openBuy} /> : <>
+    <main>{feature === 'stock-search' ? <StockSearch environment={environment} onSelectStock={openBuy} /> : feature === 'rankings' ? <Rankings environment={environment} onSelectStock={openBuy} /> : <>
       <section className="page-heading">
         <div><div className="eyebrow"><span className="live-dot" />{selected.label} · {selected.detail}</div><h1>계좌 확인</h1><p>보유 자산과 수익 현황을 한눈에 확인하세요.</p></div>
         <button className="refresh-button" onClick={() => query.refetch()} disabled={query.isFetching}><RefreshCw size={17} className={query.isFetching ? 'spin' : ''} />{query.isFetching ? '업데이트 중' : '새로고침'}</button>

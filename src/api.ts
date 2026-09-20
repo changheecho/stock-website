@@ -1,4 +1,4 @@
-import type { AccountView, Environment } from './types'
+import type { AccountView, Environment, StockSearchItem } from './types'
 
 type ApiRecord = Record<string, unknown>
 const number = (value: unknown) => Number(String(value ?? '0').replaceAll(',', '').replace(/^\+/, '')) || 0
@@ -64,4 +64,12 @@ export async function fetchAccount(environment: Exclude<Environment, 'live'>): P
   return environment === 'domestic-mock'
     ? normalizeDomestic(portfolio, cashBalance)
     : normalizeOverseas(portfolio, cashBalance)
+}
+
+export async function searchStocks(environment: Exclude<Environment, 'live'>, query: string): Promise<StockSearchItem[]> {
+  const params = new URLSearchParams({ environment, q: query })
+  const response = await fetch(`/api/stocks/search?${params}`, { headers: { accept: 'application/json' } })
+  const data = (await response.json()) as ApiRecord
+  if (!response.ok) throw new Error(text(data.message) || '종목을 검색하지 못했습니다.')
+  return (data.items as StockSearchItem[] | undefined) ?? []
 }

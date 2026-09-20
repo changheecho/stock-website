@@ -1,4 +1,15 @@
 export type Environment = 'live' | 'domestic-mock' | 'overseas-mock'
+export type Feature = 'account' | 'stock-search'
+
+export type StockSearchItem = {
+  code: string
+  name: string
+  englishName?: string
+  market: string
+  sector?: string
+  status?: string
+  isEtf?: boolean
+}
 
 export type Holding = {
   code: string

@@ -3,9 +3,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 type Environment = 'domestic-mock' | 'overseas-mock'
 type SecretConfig = { appkey: string; secretkey: string }
 type CachedToken = { value: string; expiresAt: number }
+type StockItem = { code: string; name: string; englishName?: string; market: string; sector?: string; status?: string; isEtf?: boolean }
+type CachedStocks = { value: StockItem[]; expiresAt: number }
 
 const MOCK_DOMAIN = 'https://mockapi.kiwoom.com'
 const tokenCache = new Map<Environment, CachedToken>()
+const stockCache = new Map<Environment, CachedStocks>()
 
 const sendJson = (response: ServerResponse, status: number, body: unknown) => {
   response.statusCode = status
@@ -88,6 +91,81 @@ export const createAccountHandler = (env: NodeJS.ProcessEnv) => async (
     sendJson(response, 200, await queryAccount(env, environment))
   } catch (error) {
     const message = error instanceof Error ? error.message : '계좌 정보를 불러오지 못했습니다.'
+    sendJson(response, 502, { message })
+  }
+}
+
+const queryStocks = async (env: NodeJS.ProcessEnv, environment: Environment) => {
+  const cached = stockCache.get(environment)
+  if (cached && cached.expiresAt > Date.now()) return cached.value
+
+  const token = await getToken(env, environment)
+  const headers = {
+    'content-type': 'application/json;charset=UTF-8',
+    authorization: `Bearer ${token}`,
+  }
+  let stocks: StockItem[]
+
+  if (environment === 'domestic-mock') {
+    const requestMarket = (mrkt_tp: '0' | '10') => requestKiwoom<{ list?: Record<string, unknown>[] }>(
+      `${MOCK_DOMAIN}/api/dostk/stkinfo`,
+      { method: 'POST', headers: { ...headers, 'api-id': 'ka10099' }, body: JSON.stringify({ mrkt_tp }) },
+    )
+    const markets = await Promise.all([requestMarket('0'), requestMarket('10')])
+    stocks = markets.flatMap(({ list = [] }) => list.map((item) => ({
+      code: String(item.code ?? ''),
+      name: String(item.name ?? ''),
+      market: String(item.marketName ?? ''),
+      sector: String(item.upName ?? ''),
+      status: String(item.auditInfo ?? ''),
+    })))
+  } else {
+    const data = await requestKiwoom<{ list?: Record<string, unknown>[] }>(`${MOCK_DOMAIN}/api/us/stkinfo`, {
+      method: 'POST',
+      headers: { ...headers, 'api-id': 'usa10099' },
+      body: JSON.stringify({ stex_tp: '%' }),
+    })
+    stocks = (data.list ?? []).map((item) => ({
+      code: String(item.stk_cd ?? ''),
+      name: String(item.stk_nm ?? ''),
+      englishName: String(item.stk_enm ?? ''),
+      market: String(item.mkgb ?? item.stex_tp ?? ''),
+      sector: String(item.upgb ?? ''),
+      isEtf: item.isEtf === 'Y',
+    }))
+  }
+
+  stockCache.set(environment, { value: stocks, expiresAt: Date.now() + 10 * 60 * 1000 })
+  return stocks
+}
+
+export const createStockSearchHandler = (env: NodeJS.ProcessEnv) => async (
+  request: IncomingMessage,
+  response: ServerResponse,
+) => {
+  if (request.method !== 'GET') return sendJson(response, 405, { message: '지원하지 않는 요청입니다.' })
+
+  const url = new URL(request.url || '/', 'http://localhost')
+  const environment = url.searchParams.get('environment')
+  const query = (url.searchParams.get('q') ?? '').trim()
+  if (environment !== 'domestic-mock' && environment !== 'overseas-mock') {
+    return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
+  }
+  if (!query) return sendJson(response, 200, { items: [] })
+
+  try {
+    const normalizedQuery = query.toLocaleLowerCase('ko-KR')
+    const items = (await queryStocks(env, environment))
+      .filter((item) => [item.code, item.name, item.englishName ?? ''].some((value) => value.toLocaleLowerCase('ko-KR').includes(normalizedQuery)))
+      .sort((a, b) => {
+        const values = (item: StockItem) => [item.code, item.name, item.englishName ?? ''].map((value) => value.toLocaleLowerCase('ko-KR'))
+        const rank = (item: StockItem) => values(item).some((value) => value === normalizedQuery) ? 0 : values(item).some((value) => value.startsWith(normalizedQuery)) ? 1 : 2
+        return rank(a) - rank(b) || a.code.localeCompare(b.code)
+      })
+      .slice(0, 50)
+    sendJson(response, 200, { items })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '종목을 검색하지 못했습니다.'
     sendJson(response, 502, { message })
   }
 }

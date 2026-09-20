@@ -1,9 +1,24 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { siteAssets } from 'virtual:site-assets'
 import { createAccountHandler, createRankingHandler, createStockSearchHandler, createTradingHandler } from './account.ts'
 export { setExternalApiLogSink } from './account.ts'
 
 type WorkerEnvironment = NodeJS.ProcessEnv & {
   ASSETS?: { fetch(request: Request): Promise<Response> }
+}
+
+const decodeAsset = (encoded: string) => Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0))
+
+const serveAsset = (pathname: string) => {
+  const asset = siteAssets.get(pathname === '/' ? '/index.html' : pathname)
+    ?? (!pathname.startsWith('/api/') ? siteAssets.get('/index.html') : undefined)
+  if (!asset) return null
+  return new Response(decodeAsset(asset.body), {
+    headers: {
+      'content-type': asset.contentType,
+      'cache-control': pathname === '/' || pathname.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+    },
+  })
 }
 
 const runHandler = async (
@@ -61,6 +76,8 @@ export default {
       return runHandler(request, createTradingHandler(env), `${url.pathname.slice('/api/trade'.length)}${url.search}`)
     }
 
+    const bundledAsset = serveAsset(url.pathname)
+    if (bundledAsset) return bundledAsset
     if (env.ASSETS) return env.ASSETS.fetch(request)
     return new Response('Not found', { status: 404 })
   },

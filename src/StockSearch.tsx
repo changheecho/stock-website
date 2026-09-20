@@ -2,11 +2,11 @@ import { FormEvent, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Building2, LoaderCircle, Search, SearchX } from 'lucide-react'
 import { searchStocks } from './api'
-import type { Environment } from './types'
+import type { Environment, StockSearchItem } from './types'
 
-type Props = { environment: Exclude<Environment, 'live'> }
+type Props = { environment: Exclude<Environment, 'live'>; onSelectStock: (stock: StockSearchItem) => void }
 
-export default function StockSearch({ environment }: Props) {
+export default function StockSearch({ environment, onSelectStock }: Props) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const isDomestic = environment === 'domestic-mock'
@@ -49,10 +49,12 @@ export default function StockSearch({ environment }: Props) {
     {query && result.data && result.data.length > 0 && <section className="search-results">
       <div className="result-heading"><div><h2>검색 결과</h2><p>“{query}” 검색 결과</p></div><span>{result.data.length}개</span></div>
       <ul>{result.data.map((stock) => <li key={`${stock.market}-${stock.code}`}>
+        <button className="stock-result-button" onClick={() => onSelectStock(stock)} aria-label={`${stock.name || stock.code} 거래 패널 열기`}>
         <span className="stock-symbol"><Building2 size={18} /></span>
         <div className="result-name"><b>{stock.name || stock.englishName || stock.code}</b>{stock.englishName && <span>{stock.englishName}</span>}</div>
         <div className="result-meta"><b>{stock.code}</b><span>{stock.market}{stock.sector ? ` · ${stock.sector}` : ''}</span></div>
         <div className="result-badges">{stock.isEtf && <span>ETF</span>}{stock.status && stock.status !== '정상' && <span className="warning">{stock.status}</span>}</div>
+        </button>
       </li>)}</ul>
     </section>}
   </>

@@ -6,7 +6,8 @@ import {
 } from 'lucide-react'
 import { fetchAccount } from './api'
 import StockSearch from './StockSearch'
-import type { AccountView, Environment, Feature, Holding } from './types'
+import StockTradePanel from './StockTradePanel'
+import type { AccountView, Environment, Feature, Holding, StockSearchItem } from './types'
 
 const environments: { id: Environment; label: string; detail: string; disabled?: boolean }[] = [
   { id: 'live', label: '실투자', detail: '주문 차단됨', disabled: true },
@@ -75,11 +76,12 @@ function App() {
   const [environment, setEnvironment] = useState<Exclude<Environment, 'live'>>(() => isUsMarketOpen() ? 'overseas-mock' : 'domestic-mock')
   const [feature, setFeature] = useState<Feature>('account')
   const [mobileMenu, setMobileMenu] = useState(false)
+  const [selectedStock, setSelectedStock] = useState<StockSearchItem | null>(null)
   const query = useQuery({ queryKey: ['account', environment], queryFn: () => fetchAccount(environment), enabled: feature === 'account' })
   const selected = environments.find((item) => item.id === environment)!
   const refreshedAt = useMemo(() => query.dataUpdatedAt ? new Date(query.dataUpdatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : null, [query.dataUpdatedAt])
 
-  useEffect(() => { setMobileMenu(false) }, [environment])
+  useEffect(() => { setMobileMenu(false); setSelectedStock(null) }, [environment])
 
   return <div className="app-shell">
     <header className="topbar">
@@ -100,7 +102,7 @@ function App() {
       <div className="security-note"><ShieldCheck size={20} /><div><b>보안 연결</b><span>인증정보는 서버에서만 사용됩니다.</span></div></div>
     </aside>
 
-    <main>{feature === 'stock-search' ? <StockSearch environment={environment} /> : <>
+    <main>{feature === 'stock-search' ? <StockSearch environment={environment} onSelectStock={setSelectedStock} /> : <>
       <section className="page-heading">
         <div><div className="eyebrow"><span className="live-dot" />{selected.label} · {selected.detail}</div><h1>계좌 확인</h1><p>보유 자산과 수익 현황을 한눈에 확인하세요.</p></div>
         <button className="refresh-button" onClick={() => query.refetch()} disabled={query.isFetching}><RefreshCw size={17} className={query.isFetching ? 'spin' : ''} />{query.isFetching ? '업데이트 중' : '새로고침'}</button>
@@ -125,6 +127,7 @@ function App() {
       </>}
     </>}
     </main>
+    <StockTradePanel environment={environment} stock={selectedStock} onClose={() => setSelectedStock(null)} />
   </div>
 }
 

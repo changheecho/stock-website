@@ -1,4 +1,4 @@
-import type { AccountView, Environment, StockSearchItem } from './types'
+import type { AccountView, Environment, OrderReceipt, OrderStatus, StockQuote, StockSearchItem } from './types'
 
 type ApiRecord = Record<string, unknown>
 const number = (value: unknown) => Number(String(value ?? '0').replaceAll(',', '').replace(/^\+/, '')) || 0
@@ -72,4 +72,27 @@ export async function searchStocks(environment: Exclude<Environment, 'live'>, qu
   const data = (await response.json()) as ApiRecord
   if (!response.ok) throw new Error(text(data.message) || '종목을 검색하지 못했습니다.')
   return (data.items as StockSearchItem[] | undefined) ?? []
+}
+
+async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, { ...init, headers: { accept: 'application/json', ...init?.headers } })
+  const data = (await response.json()) as T & { message?: string }
+  if (!response.ok) throw new Error(data.message || '요청을 처리하지 못했습니다.')
+  return data
+}
+
+export const fetchStockQuote = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem) => {
+  const params = new URLSearchParams({ environment, code: stock.code, exchange: stock.market })
+  return apiJson<StockQuote>(`/api/trade/quote?${params}`)
+}
+
+export const placeBuyOrder = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, quantity: number, price: number, requestId: string) =>
+  apiJson<OrderReceipt>('/api/trade/orders', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ environment, code: stock.code, exchange: stock.market, quantity, price, requestId }),
+  })
+
+export const fetchOrderStatus = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, orderNo: string) => {
+  const params = new URLSearchParams({ environment, code: stock.code, exchange: stock.market, orderNo })
+  return apiJson<OrderStatus>(`/api/trade/order-status?${params}`)
 }

@@ -11,6 +11,24 @@ export type StockSearchItem = {
   isEtf?: boolean
 }
 
+export type StockQuote = {
+  code: string
+  name: string
+  englishName?: string
+  currency: 'KRW' | 'USD'
+  currentPrice: number
+  change: number
+  changeRate: number
+  volume: number
+  high: number
+  low: number
+  canBuy: boolean
+  unavailableReason?: string
+}
+
+export type OrderReceipt = { orderNo: string; name: string; status: 'accepted'; message: string }
+export type OrderStatus = { state: 'checking' | 'pending' | 'filled'; label: string; filledQuantity: number; remainingQuantity: number; filledPrice?: number }
+
 export type Holding = {
   code: string
   name: string

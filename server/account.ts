@@ -19,7 +19,7 @@ export const setExternalApiLogSink = (sink: ExternalApiLogSink) => {
   externalApiLogSink = sink
 }
 
-const sensitiveField = /(?:authorization|token|secret|password|passwd|pwd|app[_-]?key|secret[_-]?key|access[_-]?key)/i
+const sensitiveField = /(?:authorization|token|secret|password|passwd|pwd|cookie|credential|session|app[_-]?key|secret[_-]?key|access[_-]?key|account[_-]?(?:number|no)|acnt[_-]?no)/i
 
 const redactSensitive = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(redactSensitive)

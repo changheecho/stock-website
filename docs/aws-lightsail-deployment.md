@@ -43,13 +43,13 @@ npm run build
 npm start
 ```
 
-다른 터미널에서 상태를 확인한다.
+다른 터미널에서 로그인 화면 응답을 확인한다. 앱 페이지, 정적 파일, API, `/healthz`는 모두 유효한 로그인 세션이 있어야 접근할 수 있다.
 
 ```bash
-curl http://127.0.0.1:3000/healthz
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
 ```
 
-`ok`가 출력되면 `Ctrl+C`로 서버를 종료한다. `vite preview`는 로컬 미리보기용이며 운영에서는 사용하지 않는다.
+`200`이 출력되면 브라우저에서 `http://127.0.0.1:3000/`을 열어 비밀번호 로그인을 확인한 뒤 `Ctrl+C`로 서버를 종료한다. `vite preview`는 로컬 미리보기용이며 운영에서는 사용하지 않는다.
 
 ## 2. Lightsail 인스턴스 생성
 
@@ -157,7 +157,10 @@ LIVE_DOMESTIC_APP_KEY=replace_me
 LIVE_DOMESTIC_APP_SECRET=replace_me
 LIVE_OVERSEAS_APP_KEY=replace_me
 LIVE_OVERSEAS_APP_SECRET=replace_me
+PASSWORD=replace_with_a_long_random_password
 ```
+
+`PASSWORD`는 사이트 로그인 비밀번호다. 키움 키와 함께 서버의 환경 파일에만 저장하고 저장소의 `.env`를 서버로 복사하지 않는다. 세션 쿠키는 12시간 후 만료되고, 서버 재시작 시 기존 세션은 무효화된다.
 
 파일을 앱 사용자만 읽을 수 있게 제한한다.
 
@@ -177,7 +180,7 @@ sudo cp /opt/stock-website/deploy/stock-website.service /etc/systemd/system/stoc
 sudo systemctl daemon-reload
 sudo systemctl enable --now stock-website
 sudo systemctl status stock-website
-curl http://127.0.0.1:3000/healthz
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
 ```
 
 문제가 있으면 최근 로그를 확인한다.
@@ -214,7 +217,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-`http://<도메인>/healthz`에서 `ok`가 출력되는지 확인한다.
+`http://<도메인>/login`에서 로그인 화면이 열리는지 확인한다. `/healthz`도 세션 없이 접근할 수 없으므로 로그인 뒤에 점검한다.
 
 ## 10. HTTPS 적용
 
@@ -246,7 +249,7 @@ sudo reboot
 
 ```bash
 systemctl is-active stock-website
-curl http://127.0.0.1:3000/healthz
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
 curl -4 https://checkip.amazonaws.com
 ```
 
@@ -261,7 +264,7 @@ sudo -u stock-website npm ci
 sudo -u stock-website npm run build
 sudo systemctl restart stock-website
 sudo systemctl status stock-website
-curl http://127.0.0.1:3000/healthz
+curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3000/login
 ```
 
 서비스 재시작 전 빌드가 완료되므로 빌드 실패 시 실행 중인 이전 버전은 유지된다. 큰 변경 전에는 Lightsail 스냅샷을 만들고, 배포 후 화면과 조회 API를 확인한다.

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, BriefcaseBusiness, ChevronRight,
-  CircleDollarSign, Clock3, ListOrdered, Menu, RefreshCw, Search, ShieldCheck, WalletCards, X,
+  CircleDollarSign, Clock3, ListOrdered, LogOut, Menu, RefreshCw, Search, ShieldCheck, WalletCards, X,
 } from 'lucide-react'
 import { fetchAccount } from './api'
 import StockSearch from './StockSearch'
@@ -84,6 +84,10 @@ function App() {
   const selected = environments.find((item) => item.id === environment)!
   const tradingEnabled = environment.endsWith('-mock')
   const refreshedAt = useMemo(() => query.dataUpdatedAt ? new Date(query.dataUpdatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : null, [query.dataUpdatedAt])
+  const logout = async () => {
+    await fetch('/auth/logout', { method: 'POST' })
+    window.location.assign('/login')
+  }
 
   useEffect(() => { setMobileMenu(false); setTradeSelection(null) }, [environment])
   const openBuy = (stock: StockSearchItem) => setTradeSelection({ stock, side: 'buy' })
@@ -95,6 +99,7 @@ function App() {
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><BarChart3 size={21} /></div><div><b>Portfolio Desk</b><span>개인 투자 관리</span></div></div>
+      <button className="logout-button" onClick={() => void logout()}><LogOut size={16} /><span>로그아웃</span></button>
       <div className="environment-picker" aria-label="투자 환경 선택">
         {environments.map((item) => <button key={item.id} className={environment === item.id ? 'selected' : ''} onClick={() => setEnvironment(item.id)}>
           <span className="status-dot" /> <span>{item.label}<small>{item.detail}</small></span>

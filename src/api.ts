@@ -3,6 +3,9 @@ import type { AccountView, Environment, OrderReceipt, OrderStatus, RankingsData,
 type ApiRecord = Record<string, unknown>
 const number = (value: unknown) => Number(String(value ?? '0').replaceAll(',', '').replace(/^\+/, '')) || 0
 const text = (value: unknown) => String(value ?? '').trim()
+const redirectToLoginIfUnauthorized = (response: Response) => {
+  if (response.status === 401) window.location.replace('/login')
+}
 
 const normalizeDomestic = (data: ApiRecord, cash: ApiRecord): AccountView => ({
   currency: 'KRW',
@@ -57,6 +60,7 @@ const normalizeOverseas = (data: ApiRecord, cash: ApiRecord): AccountView => ({
 
 export async function fetchAccount(environment: Environment): Promise<AccountView> {
   const response = await fetch(`/api/account?environment=${environment}`, { headers: { accept: 'application/json' } })
+  redirectToLoginIfUnauthorized(response)
   const data = (await response.json()) as ApiRecord
   if (!response.ok) throw new Error(text(data.message) || '계좌 정보를 불러오지 못했습니다.')
   const portfolio = (data.portfolio ?? {}) as ApiRecord
@@ -69,6 +73,7 @@ export async function fetchAccount(environment: Environment): Promise<AccountVie
 export async function searchStocks(environment: Environment, query: string): Promise<StockSearchItem[]> {
   const params = new URLSearchParams({ environment, q: query })
   const response = await fetch(`/api/stocks/search?${params}`, { headers: { accept: 'application/json' } })
+  redirectToLoginIfUnauthorized(response)
   const data = (await response.json()) as ApiRecord
   if (!response.ok) throw new Error(text(data.message) || '종목을 검색하지 못했습니다.')
   return (data.items as StockSearchItem[] | undefined) ?? []
@@ -76,6 +81,7 @@ export async function searchStocks(environment: Environment, query: string): Pro
 
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { ...init, headers: { accept: 'application/json', ...init?.headers } })
+  redirectToLoginIfUnauthorized(response)
   const data = (await response.json()) as T & { message?: string }
   if (!response.ok) throw new Error(data.message || '요청을 처리하지 못했습니다.')
   return data

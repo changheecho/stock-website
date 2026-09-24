@@ -3,6 +3,7 @@ import { appendFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { createAuthMiddleware } from './server/auth.ts'
 import { createAccountHandler, createRankingHandler, createStockSearchHandler, createTradingHandler, setExternalApiLogSink } from './server/account.ts'
 
 const logDirectory = resolve(process.cwd(), '.logs')
@@ -42,6 +43,22 @@ function accountApiPlugin(mode: string): Plugin {
   }
 }
 
+function authenticationPlugin(password: string | undefined): Plugin {
+  const authenticate = createAuthMiddleware(password)
+  const useAuthentication = (server: { middlewares: { use: (handler: (request: import('node:http').IncomingMessage, response: import('node:http').ServerResponse, next: (error?: unknown) => void) => void) => void } }) => {
+    server.middlewares.use((request, response, next) => {
+      void authenticate(request, response).then((handled) => {
+        if (!handled) next()
+      }).catch(next)
+    })
+  }
+  return {
+    name: 'password-authentication',
+    configureServer: useAuthentication,
+    configurePreviewServer: useAuthentication,
+  }
+}
+
 export default defineConfig(({ mode }) => ({
-  plugins: [react(), tailwindcss(), accountApiPlugin(mode)],
+  plugins: [react(), tailwindcss(), authenticationPlugin(loadEnv(mode, process.cwd(), '').PASSWORD), accountApiPlugin(mode)],
 }))

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { appendFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createAuthMiddleware } from './auth.ts'
 import {
   createAccountHandler,
   createRankingHandler,
@@ -10,6 +11,11 @@ import {
   setExternalApiLogSink,
 } from './account.ts'
 
+try {
+  process.loadEnvFile()
+} catch (error) {
+  if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error
+}
 const host = process.env.HOST || '127.0.0.1'
 const port = Number(process.env.PORT || 3000)
 const clientDirectory = resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -46,6 +52,7 @@ const handlers = {
   search: createStockSearchHandler(process.env),
   trading: createTradingHandler(process.env),
 }
+const authenticate = createAuthMiddleware(process.env.PASSWORD)
 
 const sendText = (response: ServerResponse, status: number, text: string) => {
   response.statusCode = status
@@ -87,6 +94,7 @@ const serveFile = async (request: IncomingMessage, response: ServerResponse, pat
 
 const server = createServer(async (request, response) => {
   try {
+    if (await authenticate(request, response)) return
     const url = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`)
 
     if (url.pathname === '/healthz') return sendText(response, 200, 'ok')

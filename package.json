@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && vite build --config server/vite.worker.config.ts",
+    "build": "tsc -b && vite build && vite build --config server/vite.node.config.ts",
+    "start": "node dist/server/index.js",
     "preview": "vite preview"
   },
   "dependencies": {

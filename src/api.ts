@@ -55,18 +55,18 @@ const normalizeOverseas = (data: ApiRecord, cash: ApiRecord): AccountView => ({
   })),
 })
 
-export async function fetchAccount(environment: Exclude<Environment, 'live'>): Promise<AccountView> {
+export async function fetchAccount(environment: Environment): Promise<AccountView> {
   const response = await fetch(`/api/account?environment=${environment}`, { headers: { accept: 'application/json' } })
   const data = (await response.json()) as ApiRecord
   if (!response.ok) throw new Error(text(data.message) || '계좌 정보를 불러오지 못했습니다.')
   const portfolio = (data.portfolio ?? {}) as ApiRecord
   const cashBalance = (data.cashBalance ?? {}) as ApiRecord
-  return environment === 'domestic-mock'
+  return environment.startsWith('domestic-')
     ? normalizeDomestic(portfolio, cashBalance)
     : normalizeOverseas(portfolio, cashBalance)
 }
 
-export async function searchStocks(environment: Exclude<Environment, 'live'>, query: string): Promise<StockSearchItem[]> {
+export async function searchStocks(environment: Environment, query: string): Promise<StockSearchItem[]> {
   const params = new URLSearchParams({ environment, q: query })
   const response = await fetch(`/api/stocks/search?${params}`, { headers: { accept: 'application/json' } })
   const data = (await response.json()) as ApiRecord
@@ -81,21 +81,21 @@ async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   return data
 }
 
-export const fetchStockQuote = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem) => {
+export const fetchStockQuote = (environment: Environment, stock: StockSearchItem) => {
   const params = new URLSearchParams({ environment, code: stock.code, exchange: stock.market })
   return apiJson<StockQuote>(`/api/trade/quote?${params}`)
 }
 
-export const placeTradeOrder = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, side: TradeSide, quantity: number, price: number, requestId: string) =>
+export const placeTradeOrder = (environment: Environment, stock: StockSearchItem, side: TradeSide, quantity: number, price: number, requestId: string) =>
   apiJson<OrderReceipt>('/api/trade/orders', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ environment, code: stock.code, exchange: stock.market, side, quantity, price, requestId }),
   })
 
-export const fetchOrderStatus = (environment: Exclude<Environment, 'live'>, stock: StockSearchItem, side: TradeSide, orderNo: string) => {
+export const fetchOrderStatus = (environment: Environment, stock: StockSearchItem, side: TradeSide, orderNo: string) => {
   const params = new URLSearchParams({ environment, code: stock.code, exchange: stock.market, side, orderNo })
   return apiJson<OrderStatus>(`/api/trade/order-status?${params}`)
 }
 
-export const fetchRankings = (environment: Exclude<Environment, 'live'>) =>
+export const fetchRankings = (environment: Environment) =>
   apiJson<RankingsData>(`/api/rankings?${new URLSearchParams({ environment })}`)

@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
-type Environment = 'domestic-mock' | 'overseas-mock'
+type Environment = 'domestic-live' | 'overseas-live' | 'domestic-mock' | 'overseas-mock'
+type MockEnvironment = Extract<Environment, `${string}-mock`>
 type SecretConfig = { appkey: string; secretkey: string }
 type CachedToken = { value: string; expiresAt: number }
 type StockItem = { code: string; name: string; englishName?: string; market: string; sector?: string; status?: string; isEtf?: boolean }
@@ -9,6 +10,7 @@ type OrderRequest = { environment?: string; code?: string; exchange?: string; qu
 type ExternalApiLogEntry = Record<string, unknown>
 type ExternalApiLogSink = (entry: ExternalApiLogEntry) => void | Promise<void>
 
+const LIVE_DOMAIN = 'https://api.kiwoom.com'
 const MOCK_DOMAIN = 'https://mockapi.kiwoom.com'
 const tokenCache = new Map<Environment, CachedToken>()
 const stockCache = new Map<Environment, CachedStocks>()
@@ -54,8 +56,14 @@ const sendJson = (response: ServerResponse, status: number, body: unknown) => {
   response.end(JSON.stringify(body))
 }
 
+const environments: Environment[] = ['domestic-live', 'overseas-live', 'domestic-mock', 'overseas-mock']
+const isEnvironment = (value: string | null): value is Environment => environments.includes(value as Environment)
+const isMockEnvironment = (environment: Environment): environment is MockEnvironment => environment.endsWith('-mock')
+const isOverseasEnvironment = (environment: Environment) => environment.startsWith('overseas-')
+const apiDomain = (environment: Environment) => isMockEnvironment(environment) ? MOCK_DOMAIN : LIVE_DOMAIN
+
 const getConfig = (env: NodeJS.ProcessEnv, environment: Environment): SecretConfig => {
-  const prefix = environment === 'domestic-mock' ? 'MOCK_DOMESTIC' : 'MOCK_OVERSEAS'
+  const prefix = `${isMockEnvironment(environment) ? 'MOCK' : 'LIVE'}_${isOverseasEnvironment(environment) ? 'OVERSEAS' : 'DOMESTIC'}`
   const appkey = env[`${prefix}_APP_KEY`]
   const secretkey = env[`${prefix}_APP_SECRET`]
   if (!appkey || !secretkey) throw new Error('선택한 환경의 서버 인증정보가 설정되지 않았습니다.')
@@ -118,7 +126,7 @@ const getToken = async (env: NodeJS.ProcessEnv, environment: Environment) => {
   if (cached && cached.expiresAt > Date.now() + 60_000) return cached.value
 
   const config = getConfig(env, environment)
-  const data = await requestKiwoom<{ token: string; expires_dt: string }>(`${MOCK_DOMAIN}/oauth2/token`, {
+  const data = await requestKiwoom<{ token: string; expires_dt: string }>(`${apiDomain(environment)}/oauth2/token`, {
     method: 'POST',
     headers: { 'content-type': 'application/json;charset=UTF-8' },
     body: JSON.stringify({ grant_type: 'client_credentials', ...config }),
@@ -133,9 +141,10 @@ const getToken = async (env: NodeJS.ProcessEnv, environment: Environment) => {
 
 const queryAccount = async (env: NodeJS.ProcessEnv, environment: Environment) => {
   const token = await getToken(env, environment)
-  const overseas = environment === 'overseas-mock'
+  const overseas = isOverseasEnvironment(environment)
+  const domain = apiDomain(environment)
   const request = (apiId: string, body: Record<string, string>) =>
-    requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/acnt' : '/api/dostk/acnt'}`, {
+    requestKiwoom<Record<string, unknown>>(`${domain}${overseas ? '/api/us/acnt' : '/api/dostk/acnt'}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json;charset=UTF-8',
@@ -162,7 +171,7 @@ export const createAccountHandler = (env: NodeJS.ProcessEnv) => async (
 
   const url = new URL(request.url || '/', 'http://localhost')
   const environment = url.searchParams.get('environment')
-  if (environment !== 'domestic-mock' && environment !== 'overseas-mock') {
+  if (!isEnvironment(environment)) {
     return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
   }
 
@@ -185,9 +194,10 @@ const queryStocks = async (env: NodeJS.ProcessEnv, environment: Environment) => 
   }
   let stocks: StockItem[]
 
-  if (environment === 'domestic-mock') {
+  const domain = apiDomain(environment)
+  if (!isOverseasEnvironment(environment)) {
     const requestMarket = (mrkt_tp: '0' | '10') => requestKiwoom<{ list?: Record<string, unknown>[] }>(
-      `${MOCK_DOMAIN}/api/dostk/stkinfo`,
+      `${domain}/api/dostk/stkinfo`,
       { method: 'POST', headers: { ...headers, 'api-id': 'ka10099' }, body: JSON.stringify({ mrkt_tp }) },
     )
     const markets = await Promise.all([requestMarket('0'), requestMarket('10')])
@@ -199,7 +209,7 @@ const queryStocks = async (env: NodeJS.ProcessEnv, environment: Environment) => 
       status: String(item.auditInfo ?? ''),
     })))
   } else {
-    const data = await requestKiwoom<{ list?: Record<string, unknown>[] }>(`${MOCK_DOMAIN}/api/us/stkinfo`, {
+    const data = await requestKiwoom<{ list?: Record<string, unknown>[] }>(`${domain}/api/us/stkinfo`, {
       method: 'POST',
       headers: { ...headers, 'api-id': 'usa10099' },
       body: JSON.stringify({ stex_tp: '%' }),
@@ -227,7 +237,7 @@ export const createStockSearchHandler = (env: NodeJS.ProcessEnv) => async (
   const url = new URL(request.url || '/', 'http://localhost')
   const environment = url.searchParams.get('environment')
   const query = (url.searchParams.get('q') ?? '').trim()
-  if (environment !== 'domestic-mock' && environment !== 'overseas-mock') {
+  if (!isEnvironment(environment)) {
     return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
   }
   if (!query) return sendJson(response, 200, { items: [] })
@@ -273,7 +283,7 @@ const exchangeCode = (market: string) => {
 
 const resolveExchangeCode = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, market: string) => {
   const direct = exchangeCode(market)
-  if (direct || environment === 'domestic-mock') return direct
+  if (direct || !isOverseasEnvironment(environment)) return direct
   const stock = (await queryStocks(env, environment)).find((item) => item.code === code)
   return stock ? exchangeCode(stock.market) : null
 }
@@ -283,8 +293,9 @@ const normalizeNumber = (value: unknown) => Number(String(value ?? '0').split(',
 const getQuote = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, exchange: string) => {
   const token = await getToken(env, environment)
   const headers = { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}` }
-  if (environment === 'domestic-mock') {
-    const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}/api/dostk/stkinfo`, {
+  const domain = apiDomain(environment)
+  if (!isOverseasEnvironment(environment)) {
+    const data = await requestKiwoom<Record<string, unknown>>(`${domain}/api/dostk/stkinfo`, {
       method: 'POST', headers: { ...headers, 'api-id': 'ka10001' }, body: JSON.stringify({ stk_cd: code }),
     })
     return {
@@ -297,7 +308,7 @@ const getQuote = async (env: NodeJS.ProcessEnv, environment: Environment, code: 
 
   const stex_tp = await resolveExchangeCode(env, environment, code, exchange)
   if (!stex_tp) return { code, name: '', currency: 'USD', currentPrice: 0, change: 0, changeRate: 0, volume: 0, high: 0, low: 0, canBuy: false, unavailableReason: 'NASDAQ, NYSE, AMEX 종목만 모의 매수를 지원합니다.' }
-  const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}/api/us/mrkcond`, {
+  const data = await requestKiwoom<Record<string, unknown>>(`${domain}/api/us/mrkcond`, {
     method: 'POST', headers: { ...headers, 'api-id': 'usa20100' }, body: JSON.stringify({ stex_tp, stk_cd: code }),
   })
   const suspended = String(data.trd_susp_tp ?? '')
@@ -362,7 +373,7 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
   }
 }
 
-const getOrderStatus = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, exchange: string, orderNo: string, side: 'buy' | 'sell') => {
+const getOrderStatus = async (env: NodeJS.ProcessEnv, environment: MockEnvironment, code: string, exchange: string, orderNo: string, side: 'buy' | 'sell') => {
   const token = await getToken(env, environment)
   const headers = { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}` }
   if (environment === 'domestic-mock') {
@@ -396,13 +407,19 @@ export const createTradingHandler = (env: NodeJS.ProcessEnv) => async (request: 
   try {
     if (request.method === 'GET' && url.pathname === '/quote') {
       const environment = url.searchParams.get('environment')
-      if (environment !== 'domestic-mock' && environment !== 'overseas-mock') return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
+      if (!isEnvironment(environment)) return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
       return sendJson(response, 200, await getQuote(env, environment, url.searchParams.get('code') ?? '', url.searchParams.get('exchange') ?? ''))
     }
-    if (request.method === 'POST' && url.pathname === '/orders') return sendJson(response, 200, await placeOrder(env, await readJsonBody(request)))
+    if (request.method === 'POST' && url.pathname === '/orders') {
+      const body = await readJsonBody(request)
+      if (body.environment !== 'domestic-mock' && body.environment !== 'overseas-mock') {
+        return sendJson(response, 403, { message: '실투자 환경에서는 매수·매도 주문을 실행할 수 없습니다.' })
+      }
+      return sendJson(response, 200, await placeOrder(env, body))
+    }
     if (request.method === 'GET' && url.pathname === '/order-status') {
       const environment = url.searchParams.get('environment')
-      if (environment !== 'domestic-mock' && environment !== 'overseas-mock') return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
+      if (environment !== 'domestic-mock' && environment !== 'overseas-mock') return sendJson(response, 403, { message: '실투자 환경에서는 주문 상태를 조회하지 않습니다.' })
       return sendJson(response, 200, await getOrderStatus(env, environment, url.searchParams.get('code') ?? '', url.searchParams.get('exchange') ?? '', url.searchParams.get('orderNo') ?? '', url.searchParams.get('side') === 'sell' ? 'sell' : 'buy'))
     }
     return sendJson(response, 404, { message: '요청한 거래 경로를 찾을 수 없습니다.' })
@@ -419,8 +436,9 @@ const rankingList = (data: Record<string, unknown>, key: string) => ((data[key] 
 
 const queryRankings = async (env: NodeJS.ProcessEnv, environment: Environment) => {
   const token = await getToken(env, environment)
-  const overseas = environment === 'overseas-mock'
-  const rankingUrl = `${MOCK_DOMAIN}${overseas ? '/api/us/rkinfo' : '/api/dostk/rkinfo'}`
+  const overseas = isOverseasEnvironment(environment)
+  const domain = apiDomain(environment)
+  const rankingUrl = `${domain}${overseas ? '/api/us/rkinfo' : '/api/dostk/rkinfo'}`
   const request = (apiId: string, body: Record<string, string>, url = rankingUrl) => requestKiwoom<Record<string, unknown>>(url, {
     method: 'POST', headers: { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': apiId }, body: JSON.stringify(body),
   })
@@ -434,7 +452,7 @@ const queryRankings = async (env: NodeJS.ProcessEnv, environment: Environment) =
     request('ka10032', { mrkt_tp: '000', mang_stk_incls: '0', stex_tp: '1' }),
     request('ka10027', { mrkt_tp: '000', sort_tp: '1', trde_qty_cnd: '0000', stk_cnd: '0', crd_cnd: '0', updown_incls: '1', pric_cnd: '0', trde_prica_cnd: '0', stex_tp: '1' }),
     request('ka10030', { mrkt_tp: '000', sort_tp: '1', mang_stk_incls: '0', crd_tp: '0', trde_qty_tp: '0', pric_tp: '0', trde_prica_tp: '0', mrkt_open_tp: '0', stex_tp: '1' }),
-    request('ka00198', { qry_tp: '1' }, `${MOCK_DOMAIN}/api/dostk/stkinfo`),
+    request('ka00198', { qry_tp: '1' }, `${domain}/api/dostk/stkinfo`),
   ])
 
   const kinds: RankingKind[] = ['value', 'gainers', 'volume', 'popular']
@@ -460,7 +478,7 @@ export const createRankingHandler = (env: NodeJS.ProcessEnv) => async (request: 
   if (request.method !== 'GET') return sendJson(response, 405, { message: '지원하지 않는 요청입니다.' })
   const url = new URL(request.url || '/', 'http://localhost')
   const environment = url.searchParams.get('environment')
-  if (environment !== 'domestic-mock' && environment !== 'overseas-mock') return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
+  if (!isEnvironment(environment)) return sendJson(response, 400, { message: '지원하지 않는 투자 환경입니다.' })
   try {
     sendJson(response, 200, await queryRankings(env, environment))
   } catch (error) {

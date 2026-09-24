@@ -1,0 +1,25 @@
+[Unit]
+Description=Stock website Node.js server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stock-website
+Group=stock-website
+WorkingDirectory=/opt/stock-website
+EnvironmentFile=/etc/stock-website.env
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3000
+ExecStart=/usr/bin/node /opt/stock-website/dist/server/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/stock-website/.logs
+
+[Install]
+WantedBy=multi-user.target

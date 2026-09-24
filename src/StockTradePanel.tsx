@@ -5,7 +5,7 @@ import { fetchOrderStatus, fetchStockQuote, placeTradeOrder } from './api'
 import type { Environment, TradeSelection } from './types'
 
 type Props = {
-  environment: Exclude<Environment, 'live'>
+  environment: Environment
   selection: TradeSelection | null
   onClose: () => void
 }
@@ -18,6 +18,8 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
   const stock = selection?.stock ?? null
   const side = selection?.side ?? 'buy'
   const isSell = side === 'sell'
+  const isLive = environment.endsWith('-live')
+  const isDomestic = environment.startsWith('domestic-')
   const [quantity, setQuantity] = useState('1')
   const [price, setPrice] = useState('')
   const [confirming, setConfirming] = useState(false)
@@ -34,7 +36,7 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
   const orderStatus = useQuery({
     queryKey: ['order-status', environment, stock?.code, receipt?.orderNo],
     queryFn: () => fetchOrderStatus(environment, stock!, side, receipt!.orderNo),
-    enabled: Boolean(stock && receipt),
+    enabled: Boolean(stock && receipt && !isLive),
     refetchInterval: (query) => query.state.data?.state === 'filled' ? false : 3_000,
   })
   const order = useMutation({
@@ -78,14 +80,14 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
   return <div className="trade-layer" role="presentation">
     <button className="trade-backdrop" aria-label="거래 패널 닫기" onClick={onClose} />
     <aside className="trade-panel" role="dialog" aria-modal="true" aria-label={`${stock.name} 거래 패널`}>
-      <div className="trade-header"><div><span>{environment === 'domestic-mock' ? '국내 모의투자' : '해외 모의투자'}</span><h2>{stock.name || stock.code}</h2><p>{stock.code} · {stock.market}</p></div><button onClick={onClose} aria-label="닫기"><X size={20} /></button></div>
+      <div className="trade-header"><div><span>{isDomestic ? '국내' : '해외'} {isLive ? '실투자 조회' : '모의투자'}</span><h2>{stock.name || stock.code}</h2><p>{stock.code} · {stock.market}</p></div><button onClick={onClose} aria-label="닫기"><X size={20} /></button></div>
 
       {quote.isLoading && <div className="panel-loading"><LoaderCircle className="spin" /> 종목 정보를 불러오는 중</div>}
       {quote.isError && <div className="panel-error"><AlertTriangle size={18} />{quote.error.message}<button onClick={() => quote.refetch()}><RefreshCw size={14} /> 다시 시도</button></div>}
       {quote.data && <>
         <section className="quote-summary"><div><span>현재가</span><strong>{money(quote.data.currentPrice, quote.data.currency)}</strong><small className={quote.data.change >= 0 ? 'positive' : 'negative'}>{quote.data.change >= 0 ? '+' : ''}{money(quote.data.change, quote.data.currency)} ({quote.data.changeRate >= 0 ? '+' : ''}{quote.data.changeRate.toFixed(2)}%)</small></div><dl><div><dt>고가</dt><dd>{money(quote.data.high, quote.data.currency)}</dd></div><div><dt>저가</dt><dd>{money(quote.data.low, quote.data.currency)}</dd></div><div><dt>거래량</dt><dd>{quote.data.volume.toLocaleString('ko-KR')}</dd></div></dl></section>
 
-        {!quote.data.canBuy ? <div className="buy-unavailable"><AlertTriangle size={20} /><div><b>매수할 수 없는 종목입니다</b><span>{quote.data.unavailableReason}</span></div></div> : <section className="buy-form">
+        {isLive ? <div className="buy-unavailable"><ShieldCheck size={20} /><div><b>실투자 조회 전용</b><span>현재가 정보만 제공하며 매수·매도 주문은 차단되어 있습니다.</span></div></div> : !quote.data.canBuy ? <div className="buy-unavailable"><AlertTriangle size={20} /><div><b>매수할 수 없는 종목입니다</b><span>{quote.data.unavailableReason}</span></div></div> : <section className="buy-form">
           <div className="buy-title"><div><ShoppingCart size={18} /><b>지정가 {isSell ? '매도' : '매수'}</b></div><span>모의투자</span></div>
           {isSell && <div className="available-quantity"><span>매도 가능 수량</span><strong>{selection?.availableQuantity?.toLocaleString('ko-KR') ?? 0}주</strong></div>}
           <label>주문 수량<div className="input-with-unit"><input type="number" min="1" max={isSell ? selection?.availableQuantity : undefined} step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} disabled={Boolean(receipt)} /><span>주</span></div></label>
@@ -99,7 +101,7 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
 
         {receipt && <section className="order-result"><div className="result-status"><CheckCircle2 size={21} /><div><b>주문 접수 완료</b><span>주문번호 {receipt.orderNo}</span></div></div><div className="fill-status"><span>체결 상태</span>{orderStatus.isLoading ? <b><LoaderCircle className="spin" size={14} /> 확인 중</b> : orderStatus.isError ? <b className="negative">조회 실패</b> : <b className={orderStatus.data?.state === 'filled' ? 'positive' : ''}>{orderStatus.data?.label}</b>}</div>{orderStatus.data && <div className="fill-detail"><span>체결 {orderStatus.data.filledQuantity.toLocaleString()}주</span><span>미체결 {orderStatus.data.remainingQuantity.toLocaleString()}주</span></div>}</section>}
       </>}
-      <div className="mock-notice"><ShieldCheck size={16} /><span>모든 주문은 키움 모의투자 환경에서만 실행됩니다.</span></div>
+      <div className="mock-notice"><ShieldCheck size={16} /><span>{isLive ? '실투자 환경에서는 조회 기능만 사용할 수 있습니다.' : '모든 주문은 키움 모의투자 환경에서만 실행됩니다.'}</span></div>
     </aside>
     {notice && <div className={`toast ${notice.kind}`} role="status">{notice.kind === 'success' ? <CheckCircle2 size={18} /> : <AlertTriangle size={18} />}{notice.message}</div>}
   </div>

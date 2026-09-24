@@ -10,8 +10,9 @@ import StockTradePanel from './StockTradePanel'
 import Rankings from './Rankings'
 import type { AccountView, Environment, Feature, Holding, StockSearchItem, TradeSelection } from './types'
 
-const environments: { id: Environment; label: string; detail: string; disabled?: boolean }[] = [
-  { id: 'live', label: '실투자', detail: '주문 차단됨', disabled: true },
+const environments: { id: Environment; label: string; detail: string }[] = [
+  { id: 'domestic-live', label: '국내 실투자', detail: '조회 전용' },
+  { id: 'overseas-live', label: '해외 실투자', detail: '조회 전용' },
   { id: 'domestic-mock', label: '국내 모의투자', detail: 'KRX' },
   { id: 'overseas-mock', label: '해외 모의투자', detail: 'US' },
 ]
@@ -52,11 +53,11 @@ function SummaryCard({ label, value, helper, icon: Icon }: {
   </article>
 }
 
-function HoldingsTable({ holdings, currency, onSell }: { holdings: Holding[]; currency: AccountView['currency']; onSell: (holding: Holding) => void }) {
+function HoldingsTable({ holdings, currency, onSell, tradingEnabled }: { holdings: Holding[]; currency: AccountView['currency']; onSell: (holding: Holding) => void; tradingEnabled: boolean }) {
   if (!holdings.length) return <div className="empty-state">
     <BriefcaseBusiness size={28} />
     <h3>보유 종목이 없습니다</h3>
-    <p>선택한 모의투자 계좌에 보유 중인 종목이 없습니다.</p>
+    <p>선택한 계좌에 보유 중인 종목이 없습니다.</p>
   </div>
 
   return <div className="table-scroll"><table>
@@ -69,32 +70,33 @@ function HoldingsTable({ holdings, currency, onSell }: { holdings: Holding[]; cu
       <td>{formatMoney(holding.evaluationAmount, currency)}</td>
       <td><ChangeValue value={holding.profitLoss} money={currency} /></td>
       <td><ChangeValue value={holding.returnRate} suffix="%" /></td>
-      <td><button className="sell-action" onClick={() => onSell(holding)} disabled={holding.availableQuantity <= 0}>매도</button></td>
+      <td><button className="sell-action" onClick={() => onSell(holding)} disabled={!tradingEnabled || holding.availableQuantity <= 0}>{tradingEnabled ? '매도' : '조회 전용'}</button></td>
     </tr>)}</tbody>
   </table></div>
 }
 
 function App() {
-  const [environment, setEnvironment] = useState<Exclude<Environment, 'live'>>(() => isUsMarketOpen() ? 'overseas-mock' : 'domestic-mock')
+  const [environment, setEnvironment] = useState<Environment>(() => isUsMarketOpen() ? 'overseas-mock' : 'domestic-mock')
   const [feature, setFeature] = useState<Feature>('account')
   const [mobileMenu, setMobileMenu] = useState(false)
   const [tradeSelection, setTradeSelection] = useState<TradeSelection | null>(null)
   const query = useQuery({ queryKey: ['account', environment], queryFn: () => fetchAccount(environment), enabled: feature === 'account' })
   const selected = environments.find((item) => item.id === environment)!
+  const tradingEnabled = environment.endsWith('-mock')
   const refreshedAt = useMemo(() => query.dataUpdatedAt ? new Date(query.dataUpdatedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : null, [query.dataUpdatedAt])
 
   useEffect(() => { setMobileMenu(false); setTradeSelection(null) }, [environment])
   const openBuy = (stock: StockSearchItem) => setTradeSelection({ stock, side: 'buy' })
   const openSell = (holding: Holding) => setTradeSelection({
     side: 'sell', availableQuantity: holding.availableQuantity,
-    stock: { code: holding.code, name: holding.name, market: holding.exchange ?? (environment === 'domestic-mock' ? 'KRX' : '미국') },
+    stock: { code: holding.code, name: holding.name, market: holding.exchange ?? (environment.startsWith('domestic-') ? 'KRX' : '미국') },
   })
 
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><BarChart3 size={21} /></div><div><b>Portfolio Desk</b><span>개인 투자 관리</span></div></div>
       <div className="environment-picker" aria-label="투자 환경 선택">
-        {environments.map((item) => <button key={item.id} disabled={item.disabled} className={environment === item.id ? 'selected' : ''} onClick={() => item.id !== 'live' && setEnvironment(item.id)}>
+        {environments.map((item) => <button key={item.id} className={environment === item.id ? 'selected' : ''} onClick={() => setEnvironment(item.id)}>
           <span className="status-dot" /> <span>{item.label}<small>{item.detail}</small></span>
         </button>)}
       </div>
@@ -130,7 +132,7 @@ function App() {
 
         <section className="holdings-card">
           <div className="section-heading"><div><h2>보유 종목</h2><p>현재 계좌의 종목별 평가 현황입니다.</p></div>{refreshedAt && <span><Clock3 size={14} /> {refreshedAt} 기준</span>}</div>
-          <HoldingsTable holdings={query.data.holdings} currency={query.data.currency} onSell={openSell} />
+          <HoldingsTable holdings={query.data.holdings} currency={query.data.currency} onSell={openSell} tradingEnabled={tradingEnabled} />
         </section>
       </>}
     </>}

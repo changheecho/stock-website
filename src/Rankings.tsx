@@ -3,7 +3,7 @@ import { BarChart3, Flame, LoaderCircle, RefreshCw, Search, TrendingUp } from 'l
 import { fetchRankings } from './api'
 import type { Environment, RankingItem, StockSearchItem } from './types'
 
-type Props = { environment: Exclude<Environment, 'live'>; onSelectStock: (stock: StockSearchItem) => void }
+type Props = { environment: Environment; onSelectStock: (stock: StockSearchItem) => void }
 const cards = [
   { key: 'value' as const, title: '거래대금 상위', icon: BarChart3 },
   { key: 'gainers' as const, title: '상승률 상위', icon: TrendingUp },
@@ -15,7 +15,7 @@ const price = (value: number, overseas: boolean) => new Intl.NumberFormat(overse
 
 function RankingRow({ item, kind, overseas, onSelect }: { item: RankingItem; kind: typeof cards[number]['key']; overseas: boolean; onSelect: () => void }) {
   const metric = kind === 'gainers' ? `${item.metric >= 0 ? '+' : ''}${item.metric.toFixed(2)}%` : kind === 'popular' ? `${item.metric > 0 ? '+' : ''}${item.metric}` : compact(item.metric)
-  return <li><button onClick={onSelect} aria-label={`${item.name} 거래 패널 열기`}>
+  return <li><button onClick={onSelect} aria-label={`${item.name} 종목 정보 열기`}>
     <b className={`rank-number ${item.rank <= 3 ? 'top' : ''}`}>{item.rank}</b>
     <div className="ranking-name"><strong>{item.name || item.code}</strong><span>{item.code}{item.englishName ? ` · ${item.englishName}` : ''}</span></div>
     <div className="ranking-price"><strong>{price(item.price, overseas)}</strong><span className={item.changeRate >= 0 ? 'positive' : 'negative'}>{item.changeRate >= 0 ? '+' : ''}{item.changeRate.toFixed(2)}%</span></div>
@@ -24,7 +24,7 @@ function RankingRow({ item, kind, overseas, onSelect }: { item: RankingItem; kin
 }
 
 export default function Rankings({ environment, onSelectStock }: Props) {
-  const overseas = environment === 'overseas-mock'
+  const overseas = environment.startsWith('overseas-')
   const query = useQuery({ queryKey: ['rankings', environment], queryFn: () => fetchRankings(environment), staleTime: 30_000 })
   return <>
     <section className="page-heading ranking-heading"><div><div className="eyebrow"><span className="live-dot" />시장 탐색</div><h1>종목 순위</h1><p>시장 흐름을 이끄는 종목을 빠르게 확인하세요.</p></div><button className="refresh-button" onClick={() => query.refetch()} disabled={query.isFetching}><RefreshCw size={17} className={query.isFetching ? 'spin' : ''} />새로고침</button></section>

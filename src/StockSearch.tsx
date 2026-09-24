@@ -4,12 +4,13 @@ import { AlertCircle, Building2, LoaderCircle, Search, SearchX } from 'lucide-re
 import { searchStocks } from './api'
 import type { Environment, StockSearchItem } from './types'
 
-type Props = { environment: Exclude<Environment, 'live'>; onSelectStock: (stock: StockSearchItem) => void }
+type Props = { environment: Environment; onSelectStock: (stock: StockSearchItem) => void }
 
 export default function StockSearch({ environment, onSelectStock }: Props) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
-  const isDomestic = environment === 'domestic-mock'
+  const isDomestic = environment.startsWith('domestic-')
+  const isLive = environment.endsWith('-live')
   const result = useQuery({
     queryKey: ['stock-search', environment, query],
     queryFn: () => searchStocks(environment, query),
@@ -40,7 +41,7 @@ export default function StockSearch({ environment, onSelectStock }: Props) {
         {result.isFetching && <LoaderCircle className="spin search-loader" size={18} />}
         <button disabled={!input.trim() || result.isFetching}>검색</button>
       </form>
-      <p className="search-hint">현재 {isDomestic ? '국내 모의투자' : '해외 모의투자'} 환경에 맞는 종목만 검색합니다.</p>
+      <p className="search-hint">현재 {isDomestic ? '국내' : '해외'} {isLive ? '실투자 조회' : '모의투자'} 환경에 맞는 종목만 검색합니다.</p>
     </section>
 
     {result.isError && <div className="search-message error"><AlertCircle size={25} /><div><b>검색 결과를 불러오지 못했습니다</b><span>{result.error.message}</span></div></div>}
@@ -49,7 +50,7 @@ export default function StockSearch({ environment, onSelectStock }: Props) {
     {query && result.data && result.data.length > 0 && <section className="search-results">
       <div className="result-heading"><div><h2>검색 결과</h2><p>“{query}” 검색 결과</p></div><span>{result.data.length}개</span></div>
       <ul>{result.data.map((stock) => <li key={`${stock.market}-${stock.code}`}>
-        <button className="stock-result-button" onClick={() => onSelectStock(stock)} aria-label={`${stock.name || stock.code} 거래 패널 열기`}>
+        <button className="stock-result-button" onClick={() => onSelectStock(stock)} aria-label={`${stock.name || stock.code} 종목 정보 열기`}>
         <span className="stock-symbol"><Building2 size={18} /></span>
         <div className="result-name"><b>{stock.name || stock.englishName || stock.code}</b>{stock.englishName && <span>{stock.englishName}</span>}</div>
         <div className="result-meta"><b>{stock.code}</b><span>{stock.market}{stock.sector ? ` · ${stock.sector}` : ''}</span></div>

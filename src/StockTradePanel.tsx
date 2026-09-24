@@ -92,7 +92,7 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
           {isSell && <div className="available-quantity"><span>매도 가능 수량</span><strong>{selection?.availableQuantity?.toLocaleString('ko-KR') ?? 0}주</strong></div>}
           <label>주문 수량<div className="input-with-unit"><input type="number" min="1" max={isSell ? selection?.availableQuantity : undefined} step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} disabled={Boolean(receipt)} /><span>주</span></div></label>
           {isSell && Number(quantity) > (selection?.availableQuantity ?? 0) && <p className="quantity-error">매도 가능 수량을 초과할 수 없습니다.</p>}
-          <label>주문 가격<div className="input-with-unit"><input type="number" min={quote.data.currency === 'KRW' ? '1' : '0.0001'} step={quote.data.currency === 'KRW' ? '1' : '0.0001'} value={price} onChange={(event) => setPrice(event.target.value)} disabled={Boolean(receipt)} /><span>{quote.data.currency}</span></div></label>
+          <label>주문 가격<div className="input-with-unit"><input type="number" min={quote.data.currency === 'KRW' ? '1' : '0.0001'} step={quote.data.currency === 'KRW' ? '1' : Number(price) < 1 ? '0.0001' : '0.01'} value={price} onChange={(event) => setPrice(event.target.value)} disabled={Boolean(receipt)} /><span>{quote.data.currency}</span></div></label>
           <div className="order-total"><span>예상 주문금액</span><strong>{money(total, quote.data.currency)}</strong></div>
           {!receipt && <button className={`buy-button ${isSell ? 'sell' : ''}`} disabled={!valid || order.isPending} onClick={startConfirmation}>{isSell ? '매도' : '매수'} 주문 확인</button>}
         </section>}

@@ -345,6 +345,14 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
     if (overseas && !stex_tp) throw new Error('이 거래소는 해외 모의투자 주문을 지원하지 않습니다.')
     if (!overseas && !/^\d{6}$/.test(code)) throw new Error('국내 주문은 6자리 종목코드만 지원합니다.')
 
+    if (overseas) {
+      const decimalPlaces = String(body.price).split('.')[1]?.length ?? 0
+      const maxDecimalPlaces = price < 1 ? 4 : 2
+      if (decimalPlaces > maxDecimalPlaces) {
+        throw new Error('해외 주문 가격은 $1 미만이면 소수점 4자리, $1 이상이면 소수점 2자리까지 입력할 수 있습니다.')
+      }
+    }
+
     if (side === 'sell') {
       const balance = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/acnt' : '/api/dostk/acnt'}`, {
         method: 'POST',
@@ -361,7 +369,7 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
       method: 'POST',
       headers: { ...headers, 'api-id': overseas ? (side === 'sell' ? 'ust20001' : 'ust20000') : (side === 'sell' ? 'kt10001' : 'kt10000') },
       body: JSON.stringify(overseas
-        ? { stex_tp, stk_cd: code, ord_qty: String(quantity), ord_uv: price.toFixed(4), ...(side === 'sell' ? { stop_pric: '' } : {}), trde_tp: '00' }
+        ? { stex_tp, stk_cd: code, ord_qty: String(quantity), ord_uv: price.toFixed(price < 1 ? 4 : 2), ...(side === 'sell' ? { stop_pric: '' } : {}), trde_tp: '00' }
         : { dmst_stex_tp: 'KRX', stk_cd: code, ord_qty: String(quantity), ord_uv: String(Math.trunc(price)), trde_tp: '0', cond_uv: '' }),
     })
     const result = { orderNo: String(data.ord_no ?? ''), name: String(data.stk_nm ?? ''), status: 'accepted', message: `모의 ${side === 'sell' ? '매도' : '매수'} 주문이 접수되었습니다.` }

@@ -58,7 +58,10 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
     setQuantity('1'); setPrice(''); setConfirming(false); setReceipt(null); setNotice(null); requestId.current = ''
   }, [stock?.code, environment, side])
   useEffect(() => {
-    if (quote.data?.currentPrice && !price) setPrice(String(quote.data.currentPrice))
+    if (quote.data?.currentPrice && !price) {
+      const currentPrice = quote.data.currentPrice
+      setPrice(quote.data.currency === 'KRW' ? String(Math.trunc(currentPrice)) : currentPrice.toFixed(currentPrice < 1 ? 4 : 2))
+    }
   }, [quote.data?.currentPrice, price])
   useEffect(() => {
     if (!notice) return
@@ -68,7 +71,10 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
 
   const total = useMemo(() => Number(quantity || 0) * Number(price || 0), [quantity, price])
   const validQuantity = Number.isInteger(Number(quantity)) && Number(quantity) > 0 && (!isSell || Number(quantity) <= (selection?.availableQuantity ?? 0))
-  const valid = validQuantity && Number(price) > 0
+  const validPrice = quote.data?.currency === 'KRW'
+    ? Number.isInteger(Number(price)) && Number(price) > 0
+    : Number(price) > 0 && (Number(price) < 1 ? /^\d+(?:\.\d{1,4})?$/.test(price) : /^\d+(?:\.\d{1,2})?$/.test(price))
+  const valid = validQuantity && validPrice
   if (!stock) return null
 
   const startConfirmation = () => {
@@ -92,7 +98,8 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
           {isSell && <div className="available-quantity"><span>매도 가능 수량</span><strong>{selection?.availableQuantity?.toLocaleString('ko-KR') ?? 0}주</strong></div>}
           <label>주문 수량<div className="input-with-unit"><input type="number" min="1" max={isSell ? selection?.availableQuantity : undefined} step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} disabled={Boolean(receipt)} /><span>주</span></div></label>
           {isSell && Number(quantity) > (selection?.availableQuantity ?? 0) && <p className="quantity-error">매도 가능 수량을 초과할 수 없습니다.</p>}
-          <label>주문 가격<div className="input-with-unit"><input type="number" min={quote.data.currency === 'KRW' ? '1' : '0.0001'} step={quote.data.currency === 'KRW' ? '1' : Number(price) < 1 ? '0.0001' : '0.01'} value={price} onChange={(event) => setPrice(event.target.value)} disabled={Boolean(receipt)} /><span>{quote.data.currency}</span></div></label>
+          <label>주문 가격<div className="input-with-unit"><input type="number" min={quote.data.currency === 'KRW' ? '1' : Number(price) < 1 ? '0.0001' : '0.01'} step={quote.data.currency === 'KRW' ? '1' : Number(price) < 1 ? '0.0001' : '0.01'} value={price} onChange={(event) => setPrice(event.target.value)} disabled={Boolean(receipt)} /><span>{quote.data.currency}</span></div></label>
+          {!validPrice && <p className="quantity-error">{quote.data.currency === 'KRW' ? '국내 주문 가격은 원 단위 정수로 입력하세요.' : '해외 주문 가격은 $1 미만이면 소수점 4자리, $1 이상이면 소수점 2자리까지 입력할 수 있습니다.'}</p>}
           <div className="order-total"><span>예상 주문금액</span><strong>{money(total, quote.data.currency)}</strong></div>
           {!receipt && <button className={`buy-button ${isSell ? 'sell' : ''}`} disabled={!valid || order.isPending} onClick={startConfirmation}>{isSell ? '매도' : '매수'} 주문 확인</button>}
         </section>}

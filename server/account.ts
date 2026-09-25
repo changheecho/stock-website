@@ -289,6 +289,10 @@ const resolveExchangeCode = async (env: NodeJS.ProcessEnv, environment: Environm
 }
 
 const normalizeNumber = (value: unknown) => Number(String(value ?? '0').split(',').join('').replace(/^\+/, '')) || 0
+const normalizeStockCode = (value: unknown, overseas: boolean) => {
+  const code = String(value ?? '')
+  return overseas ? code : code.replace(/^[AJQ]/, '')
+}
 
 const getQuote = async (env: NodeJS.ProcessEnv, environment: Environment, code: string, exchange: string) => {
   const token = await getToken(env, environment)
@@ -360,7 +364,7 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
         body: JSON.stringify(overseas ? { stex_tp: stex_tp ?? '', stk_cd: code } : { qry_tp: '1', dmst_stex_tp: 'KRX' }),
       })
       const holdings = (overseas ? balance.result_list : balance.acnt_evlt_remn_indv_tot) as Record<string, unknown>[] | undefined
-      const holding = (holdings ?? []).find((item) => String(overseas ? item.stk_cd : item.stk_cd).replace(/^[AJQ]/, '') === code)
+      const holding = (holdings ?? []).find((item) => normalizeStockCode(item.stk_cd, overseas) === code)
       const availableQuantity = normalizeNumber(overseas ? holding?.sell_alowq : holding?.trde_able_qty)
       if (availableQuantity < quantity) throw new Error(`최신 매도 가능 수량(${availableQuantity}주)을 초과했습니다.`)
     }
@@ -469,7 +473,7 @@ const queryRankings = async (env: NodeJS.ProcessEnv, environment: Environment) =
     const rows = rankingList(responses[index], keys[index]).slice(0, 10)
     const items: RankingItem[] = rows.map((item, rowIndex) => ({
       rank: normalizeNumber(item.rank ?? item.now_rank ?? item.bigd_rank) || rowIndex + 1,
-      code: String(item.stk_cd ?? '').replace(/^[AJQ]/, ''),
+      code: normalizeStockCode(item.stk_cd, overseas),
       name: String(item.stk_nm ?? ''),
       englishName: overseas ? String(item.stk_enm ?? '') : undefined,
       market: overseas ? String(item.stex_tp ?? '') : 'KRX',

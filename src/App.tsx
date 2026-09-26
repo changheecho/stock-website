@@ -8,6 +8,7 @@ import { fetchAccount } from './api'
 import StockSearch from './StockSearch'
 import StockTradePanel from './StockTradePanel'
 import Rankings from './Rankings'
+import AccountCsvDownload from './AccountCsvDownload'
 import type { AccountView, Environment, Feature, Holding, StockSearchItem, TradeSelection } from './types'
 
 const environments: { id: Environment; label: string; detail: string }[] = [
@@ -136,7 +137,7 @@ function App() {
         </section>
 
         <section className="holdings-card">
-          <div className="section-heading"><div><h2>보유 종목</h2><p>현재 계좌의 종목별 평가 현황입니다.</p></div>{refreshedAt && <span><Clock3 size={14} /> {refreshedAt} 기준</span>}</div>
+          <div className="section-heading"><div><h2>보유 종목</h2><p>현재 계좌의 종목별 평가 현황입니다.</p></div><div className="section-actions">{refreshedAt && <span><Clock3 size={14} /> {refreshedAt} 기준</span>}<AccountCsvDownload account={query.data} environment={environment} /></div></div>
           <HoldingsTable holdings={query.data.holdings} currency={query.data.currency} onSell={openSell} tradingEnabled={tradingEnabled} />
         </section>
       </>}

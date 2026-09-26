@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build && vite build --config server/vite.node.config.ts",
     "lint": "eslint .",
-    "test": "node --experimental-strip-types --test server/auth.test.ts",
+    "test": "node --experimental-strip-types --test server/auth.test.ts src/accountCsv.test.ts",
     "start": "node dist/server/index.js",
     "preview": "vite preview"
   },

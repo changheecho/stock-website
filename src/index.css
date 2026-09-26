@@ -54,3 +54,11 @@ main { min-width: 0; padding: 42px clamp(24px, 4vw, 64px) 60px; max-width: 1600p
 .watchlist-results .stock-result-button { grid-template-columns: auto minmax(150px,1fr) minmax(180px,1fr); }
 .watchlist-empty { margin-top: 0; }
 @media (max-width:720px) { .search-results .stock-result-button { padding-right: 58px; }.watchlist-results .stock-result-button { grid-template-columns: auto 1fr; }.watchlist-results .result-meta { grid-column: 2; } }
+.quantity-stepper,.budget-controls { display: flex; gap: 7px; margin-top: 7px; }
+.quantity-stepper button,.budget-controls button,.usd-budget button { border: 1px solid #cfdbd6; border-radius: 7px; padding: 7px 11px; color: #3d6657; background: #f8fbfa; font: inherit; font-size: 10px; font-weight: 700; cursor: pointer; }
+.quantity-stepper button:disabled,.budget-controls button:disabled,.usd-budget button:disabled { opacity: .4; cursor: not-allowed; }
+.budget-controls button { flex: 1; }
+.usd-budget { margin-top: 12px !important; }
+.usd-budget > div { display: flex; gap: 7px; margin-top: 6px; }
+.usd-budget input { min-width: 0; flex: 1; border: 1px solid #d7e1dc; border-radius: 8px; padding: 9px 11px; font: inherit; font-size: 11px; }
+.usd-budget small { display: block; margin-top: 5px; color: #89958f; font-size: 9px; font-weight: 400; }

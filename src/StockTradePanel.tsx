@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, LoaderCircle, RefreshCw, ShieldCheck, ShoppingCart, X } from 'lucide-react'
 import { fetchOrderStatus, fetchStockQuote, placeTradeOrder } from './api'
+import OrderQuantityControls from './OrderQuantityControls'
 import type { Environment, TradeSelection } from './types'
 
 type Props = {
@@ -97,6 +98,7 @@ export default function StockTradePanel({ environment, selection, onClose }: Pro
           <div className="buy-title"><div><ShoppingCart size={18} /><b>지정가 {isSell ? '매도' : '매수'}</b></div><span>모의투자</span></div>
           {isSell && <div className="available-quantity"><span>매도 가능 수량</span><strong>{selection?.availableQuantity?.toLocaleString('ko-KR') ?? 0}주</strong></div>}
           <label>주문 수량<div className="input-with-unit"><input type="number" min="1" max={isSell ? selection?.availableQuantity : undefined} step="1" value={quantity} onChange={(event) => setQuantity(event.target.value)} disabled={Boolean(receipt)} /><span>주</span></div></label>
+          <OrderQuantityControls currency={quote.data.currency} price={Number(price)} quantity={quantity} maxQuantity={isSell ? selection?.availableQuantity : undefined} disabled={Boolean(receipt)} onChange={setQuantity} />
           {isSell && Number(quantity) > (selection?.availableQuantity ?? 0) && <p className="quantity-error">매도 가능 수량을 초과할 수 없습니다.</p>}
           <label>주문 가격<div className="input-with-unit"><input type="number" min={quote.data.currency === 'KRW' ? '1' : Number(price) < 1 ? '0.0001' : '0.01'} step={quote.data.currency === 'KRW' ? '1' : Number(price) < 1 ? '0.0001' : '0.01'} value={price} onChange={(event) => setPrice(event.target.value)} disabled={Boolean(receipt)} /><span>{quote.data.currency}</span></div></label>
           {!validPrice && <p className="quantity-error">{quote.data.currency === 'KRW' ? '국내 주문 가격은 원 단위 정수로 입력하세요.' : '해외 주문 가격은 $1 미만이면 소수점 4자리, $1 이상이면 소수점 2자리까지 입력할 수 있습니다.'}</p>}

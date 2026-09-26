@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createAuthMiddleware } from './auth.ts'
+import { createTelegramSettingsHandler, notifyFill, notifyLogin } from './telegram.ts'
 import {
   createAccountHandler,
   createRankingHandler,
@@ -50,9 +51,10 @@ const handlers = {
   account: createAccountHandler(process.env),
   rankings: createRankingHandler(process.env),
   search: createStockSearchHandler(process.env),
-  trading: createTradingHandler(process.env),
+  trading: createTradingHandler(process.env, (fill) => notifyFill(process.env, fill)),
+  telegramSettings: createTelegramSettingsHandler(process.env),
 }
-const authenticate = createAuthMiddleware(process.env.PASSWORD)
+const authenticate = createAuthMiddleware(process.env.PASSWORD, undefined, () => notifyLogin(process.env))
 
 const sendText = (response: ServerResponse, status: number, text: string) => {
   response.statusCode = status
@@ -101,6 +103,7 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/api/account') return handlers.account(request, response)
     if (url.pathname === '/api/stocks/search') return handlers.search(request, response)
     if (url.pathname === '/api/rankings') return handlers.rankings(request, response)
+    if (url.pathname === '/api/settings/telegram') return handlers.telegramSettings(request, response)
     if (url.pathname.startsWith('/api/trade/')) {
       request.url = `${url.pathname.slice('/api/trade'.length)}${url.search}`
       return handlers.trading(request, response)

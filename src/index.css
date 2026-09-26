@@ -64,3 +64,15 @@ main { min-width: 0; padding: 42px clamp(24px, 4vw, 64px) 60px; max-width: 1600p
 .usd-budget > div { display: flex; gap: 7px; margin-top: 6px; }
 .usd-budget input { min-width: 0; flex: 1; border: 1px solid #d7e1dc; border-radius: 8px; padding: 9px 11px; font: inherit; font-size: 11px; }
 .usd-budget small { display: block; margin-top: 5px; color: #89958f; font-size: 9px; font-weight: 400; }
+.notification-settings { max-width: 760px; padding: 24px; border: 1px solid #dfe7e3; border-radius: 14px; background: #fff; box-shadow: 0 7px 24px #1c473708; }
+.notification-loading,.telegram-status { display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: 10px; color: #38614f; background: #f0f7f3; font-size: 12px; }
+.telegram-status.disconnected { color: #9b554c; background: #fcf3f1; }
+.telegram-status b,.telegram-status span { display: block; }.telegram-status span { margin-top: 4px; color: #82918a; font-size: 10px; }
+.chat-id-field { display: block; margin: 22px 0; color: #596d63; font-size: 11px; font-weight: 700; }
+.chat-id-field input { display: block; width: 100%; margin-top: 7px; padding: 11px 13px; border: 1px solid #d7e1dc; border-radius: 8px; color: #233b32; background: #fff; font: inherit; font-size: 12px; }
+.notification-options { border: 1px solid #e3eae6; border-radius: 10px; overflow: hidden; }
+.notification-option { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px; border-bottom: 1px solid #edf1ef; cursor: pointer; }
+.notification-option:last-child { border-bottom: 0; }.notification-option b,.notification-option small { display: block; }.notification-option b { color: #30493d; font-size: 12px; }.notification-option small { margin-top: 4px; color: #87948e; font-size: 10px; }
+.notification-option input { width: 18px; height: 18px; accent-color: #26765a; }
+.notification-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; }.notification-footer .refresh-button { cursor: pointer; }.notification-success,.notification-error { color: #38745a; font-size: 11px; }.notification-error { color: #ae4d48; }
+@media (max-width:720px) { .notification-settings { padding: 16px; }.notification-footer { align-items: flex-start; flex-direction: column-reverse; }.notification-footer button { align-self: flex-end; } }

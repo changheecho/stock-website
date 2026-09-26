@@ -129,7 +129,7 @@ const isSecureRequest = (request: IncomingMessage) => {
 const sessionCookie = (sessionId: string, secure: boolean) =>
   `${SESSION_COOKIE}=${sessionId}; Path=/; Max-Age=${SESSION_TTL_MS / 1000}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`
 
-export const createAuthMiddleware = (password: string | undefined, manager = new AuthManager(password)) => async (
+export const createAuthMiddleware = (password: string | undefined, manager = new AuthManager(password), onLogin?: () => void | Promise<void>) => async (
   request: IncomingMessage,
   response: ServerResponse,
 ) => {
@@ -168,6 +168,7 @@ export const createAuthMiddleware = (password: string | undefined, manager = new
       return true
     }
     response.setHeader('set-cookie', sessionCookie(result.sessionId, isSecureRequest(request)))
+    if (onLogin) void Promise.resolve().then(onLogin).catch(() => undefined)
     sendJson(response, 200, { ok: true })
     return true
   }

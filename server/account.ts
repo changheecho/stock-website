@@ -414,7 +414,33 @@ const getOrderStatus = async (env: NodeJS.ProcessEnv, environment: MockEnvironme
   return { state: label === '체결완료' || (remainingQuantity === 0 && filledQuantity > 0) ? 'filled' : 'pending', label, filledQuantity, remainingQuantity, filledPrice: normalizeNumber(item.cntr_uv) }
 }
 
-export const createTradingHandler = (env: NodeJS.ProcessEnv) => async (request: IncomingMessage, response: ServerResponse) => {
+type FilledOrder = { environment: MockEnvironment; code: string; exchange: string; orderNo: string; side: 'buy' | 'sell'; quantity: number; price: number }
+type FillNotificationSink = (fill: FilledOrder) => void | Promise<void>
+
+export const createTradingHandler = (env: NodeJS.ProcessEnv, onFilled?: FillNotificationSink) => {
+  const activeWatchers = new Set<string>()
+  const watchOrder = (order: FilledOrder, startedAt = Date.now()) => {
+    const key = `${order.environment}:${order.side}:${order.orderNo}`
+    if (activeWatchers.has(key)) return
+    activeWatchers.add(key)
+    const check = async () => {
+      if (Date.now() - startedAt >= 24 * 60 * 60 * 1000) { activeWatchers.delete(key); return }
+      try {
+        const status = await getOrderStatus(env, order.environment, order.code, order.exchange, order.orderNo, order.side)
+        if (status.filledQuantity > 0 && onFilled) {
+          void Promise.resolve(onFilled({ ...order, quantity: status.filledQuantity, price: status.filledPrice ?? 0 })).catch(() => undefined)
+        }
+        if (status.state === 'filled') { activeWatchers.delete(key); return }
+      } catch {
+        // A transient Kiwoom failure should not stop later fill checks.
+      }
+      const timer = setTimeout(() => { void check() }, 5_000)
+      timer.unref()
+    }
+    const timer = setTimeout(() => { void check() }, 3_000)
+    timer.unref()
+  }
+  return async (request: IncomingMessage, response: ServerResponse) => {
   const url = new URL(request.url || '/', 'http://localhost')
   try {
     if (request.method === 'GET' && url.pathname === '/quote') {
@@ -427,17 +453,36 @@ export const createTradingHandler = (env: NodeJS.ProcessEnv) => async (request: 
       if (body.environment !== 'domestic-mock' && body.environment !== 'overseas-mock') {
         return sendJson(response, 403, { message: '실투자 환경에서는 매수·매도 주문을 실행할 수 없습니다.' })
       }
-      return sendJson(response, 200, await placeOrder(env, body))
+      const receipt = await placeOrder(env, body) as { orderNo?: string; name?: string; status?: string; message?: string }
+      if (onFilled && receipt.orderNo) watchOrder({
+        environment: body.environment,
+        code: String(body.code ?? ''),
+        exchange: String(body.exchange ?? ''),
+        orderNo: receipt.orderNo,
+        side: body.side === 'sell' ? 'sell' : 'buy',
+        quantity: 0,
+        price: Number(body.price) || 0,
+      })
+      return sendJson(response, 200, receipt)
     }
     if (request.method === 'GET' && url.pathname === '/order-status') {
       const environment = url.searchParams.get('environment')
       if (environment !== 'domestic-mock' && environment !== 'overseas-mock') return sendJson(response, 403, { message: '실투자 환경에서는 주문 상태를 조회하지 않습니다.' })
-      return sendJson(response, 200, await getOrderStatus(env, environment, url.searchParams.get('code') ?? '', url.searchParams.get('exchange') ?? '', url.searchParams.get('orderNo') ?? '', url.searchParams.get('side') === 'sell' ? 'sell' : 'buy'))
+      const code = url.searchParams.get('code') ?? ''
+      const exchange = url.searchParams.get('exchange') ?? ''
+      const orderNo = url.searchParams.get('orderNo') ?? ''
+      const side = url.searchParams.get('side') === 'sell' ? 'sell' : 'buy'
+      const status = await getOrderStatus(env, environment, code, exchange, orderNo, side)
+      if (status.filledQuantity > 0 && onFilled) {
+        void Promise.resolve(onFilled({ environment, code, exchange, orderNo, side, quantity: status.filledQuantity, price: status.filledPrice ?? 0 })).catch(() => undefined)
+      }
+      return sendJson(response, 200, status)
     }
     return sendJson(response, 404, { message: '요청한 거래 경로를 찾을 수 없습니다.' })
   } catch (error) {
     const message = error instanceof Error ? error.message : '거래 요청을 처리하지 못했습니다.'
     sendJson(response, 502, { message })
+  }
   }
 }
 

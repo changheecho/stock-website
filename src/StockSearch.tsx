@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Building2, LoaderCircle, Search, SearchX } from 'lucide-react'
 import { searchStocks } from './api'
 import type { Environment, StockSearchItem } from './types'
+import { WatchlistButton } from './Watchlist'
 
-type Props = { environment: Environment; onSelectStock: (stock: StockSearchItem) => void }
+type Props = { environment: Environment; onSelectStock: (stock: StockSearchItem) => void; isWatchlisted: (stock: StockSearchItem) => boolean; onToggleWatchlist: (stock: StockSearchItem) => void }
 
-export default function StockSearch({ environment, onSelectStock }: Props) {
+export default function StockSearch({ environment, onSelectStock, isWatchlisted, onToggleWatchlist }: Props) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
   const isDomestic = environment.startsWith('domestic-')
@@ -56,6 +57,7 @@ export default function StockSearch({ environment, onSelectStock }: Props) {
         <div className="result-meta"><b>{stock.code}</b><span>{stock.market}{stock.sector ? ` · ${stock.sector}` : ''}</span></div>
         <div className="result-badges">{stock.isEtf && <span>ETF</span>}{stock.status && stock.status !== '정상' && <span className="warning">{stock.status}</span>}</div>
         </button>
+        <WatchlistButton stock={stock} selected={isWatchlisted(stock)} onToggle={onToggleWatchlist} />
       </li>)}</ul>
     </section>}
   </>

@@ -10,6 +10,7 @@ import StockTradePanel from './StockTradePanel'
 import Rankings from './Rankings'
 import AccountCsvDownload from './AccountCsvDownload'
 import { useWatchlist, WatchlistPage } from './Watchlist'
+import HoldingsTable from './HoldingsTable'
 import type { AccountView, Environment, Feature, Holding, StockSearchItem, TradeSelection } from './types'
 
 const environments: { id: Environment; label: string; detail: string }[] = [
@@ -53,28 +54,6 @@ function SummaryCard({ label, value, helper, icon: Icon }: {
     <strong>{value}</strong>
     {helper && <div className="card-helper">{helper}</div>}
   </article>
-}
-
-function HoldingsTable({ holdings, currency, onSell, tradingEnabled }: { holdings: Holding[]; currency: AccountView['currency']; onSell: (holding: Holding) => void; tradingEnabled: boolean }) {
-  if (!holdings.length) return <div className="empty-state">
-    <BriefcaseBusiness size={28} />
-    <h3>보유 종목이 없습니다</h3>
-    <p>선택한 계좌에 보유 중인 종목이 없습니다.</p>
-  </div>
-
-  return <div className="table-scroll"><table>
-    <thead><tr><th>종목</th><th>보유 수량</th><th>평균 단가</th><th>현재가</th><th>평가 금액</th><th>평가 손익</th><th>수익률</th><th>거래</th></tr></thead>
-    <tbody>{holdings.map((holding) => <tr key={`${holding.code}-${holding.purchasePrice}`}>
-      <td><div className="stock-name"><span className="ticker">{holding.code.slice(0, 2)}</span><div><b>{holding.name || holding.code}</b><small>{holding.code}{holding.exchange ? ` · ${holding.exchange}` : ''}</small></div></div></td>
-      <td>{formatNumber(holding.quantity, 4)}주<small className="sub-value">매도 가능 {formatNumber(holding.availableQuantity, 4)}</small></td>
-      <td>{formatMoney(holding.purchasePrice, currency)}</td>
-      <td>{formatMoney(holding.currentPrice, currency)}</td>
-      <td>{formatMoney(holding.evaluationAmount, currency)}</td>
-      <td><ChangeValue value={holding.profitLoss} money={currency} /></td>
-      <td><ChangeValue value={holding.returnRate} suffix="%" /></td>
-      <td><button className="sell-action" onClick={() => onSell(holding)} disabled={!tradingEnabled || holding.availableQuantity <= 0}>{tradingEnabled ? '매도' : '조회 전용'}</button></td>
-    </tr>)}</tbody>
-  </table></div>
 }
 
 function App() {

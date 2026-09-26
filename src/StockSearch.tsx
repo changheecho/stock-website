@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, Building2, LoaderCircle, Search, SearchX } from 'lucide-react'
 import { searchStocks } from './api'
+import RecentSearches from './RecentSearches'
+import { addRecentSearch, parseRecentSearches, RECENT_SEARCHES_KEY } from './recentSearchStorage'
 import type { Environment, StockSearchItem } from './types'
 import { WatchlistButton } from './Watchlist'
 
@@ -10,6 +12,7 @@ type Props = { environment: Environment; onSelectStock: (stock: StockSearchItem)
 export default function StockSearch({ environment, onSelectStock, isWatchlisted, onToggleWatchlist }: Props) {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
+  const [recentSearches, setRecentSearches] = useState(() => parseRecentSearches(localStorage.getItem(RECENT_SEARCHES_KEY)))
   const isDomestic = environment.startsWith('domestic-')
   const isLive = environment.endsWith('-live')
   const result = useQuery({
@@ -21,10 +24,22 @@ export default function StockSearch({ environment, onSelectStock, isWatchlisted,
 
   useEffect(() => { setInput(''); setQuery('') }, [environment])
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    setQuery(input.trim())
+  const saveRecentSearches = (searches: string[]) => {
+    setRecentSearches(searches)
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(searches))
   }
+
+  const search = (value: string) => {
+    const normalized = value.trim()
+    if (!normalized) return
+    setInput(normalized)
+    setQuery(normalized)
+    saveRecentSearches(addRecentSearch(recentSearches, normalized))
+  }
+
+  const submit = (event: FormEvent) => { event.preventDefault(); search(input) }
+  const removeRecentSearch = (value: string) => saveRecentSearches(recentSearches.filter((item) => item !== value))
+  const clearRecentSearches = () => { setRecentSearches([]); localStorage.removeItem(RECENT_SEARCHES_KEY) }
 
   return <>
     <section className="page-heading search-heading">
@@ -43,6 +58,7 @@ export default function StockSearch({ environment, onSelectStock, isWatchlisted,
         <button disabled={!input.trim() || result.isFetching}>검색</button>
       </form>
       <p className="search-hint">현재 {isDomestic ? '국내' : '해외'} {isLive ? '실투자 조회' : '모의투자'} 환경에 맞는 종목만 검색합니다.</p>
+      <RecentSearches searches={recentSearches} onSelect={search} onRemove={removeRecentSearch} onClear={clearRecentSearches} />
     </section>
 
     {result.isError && <div className="search-message error"><AlertCircle size={25} /><div><b>검색 결과를 불러오지 못했습니다</b><span>{result.error.message}</span></div></div>}

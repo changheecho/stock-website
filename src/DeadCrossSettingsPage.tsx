@@ -7,6 +7,8 @@ import {
   type DeadCrossMarketSettings, type StrategyMarket, type StrategySettingsDocument,
 } from './strategySettings'
 import type { Environment, StockSearchItem } from './types'
+import { saveServerStrategySettings } from './api'
+import StrategyRuntimeStatus from './StrategyRuntimeStatus'
 
 export default function DeadCrossSettingsPage({ environment }: { environment: Environment }) {
   const [market, setMarket] = useState<StrategyMarket>(environment.startsWith('overseas-') ? 'overseas' : 'domestic')
@@ -18,6 +20,18 @@ export default function DeadCrossSettingsPage({ environment }: { environment: En
   const settings = document.strategies.deadCross[market]
   const validationError = validateDeadCrossSettings(market, settings)
   const hours = MARKET_TRADING_HOURS[market]
+
+  useEffect(() => {
+    let active = true
+    void fetch('/api/strategies/settings').then(async (response) => {
+      const data = await response.json() as { configured?: boolean; settings?: StrategySettingsDocument; message?: string }
+      if (!response.ok) throw new Error(data.message || '서버 전략 설정을 불러오지 못했습니다.')
+      let next = data.settings ?? loadStrategySettings(localStorage.getItem(STRATEGY_SETTINGS_STORAGE_KEY))
+      if (!data.configured) { next = loadStrategySettings(localStorage.getItem(STRATEGY_SETTINGS_STORAGE_KEY)); await saveServerStrategySettings(next) }
+      if (active) { setDocument(next); localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next)) }
+    }).catch((error: unknown) => { if (active) { setMessage(error instanceof Error ? error.message : '서버 전략 설정을 불러오지 못했습니다.'); setMessageIsError(true) } })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (environment === 'domestic-mock') setMarket('domestic')
@@ -33,7 +47,10 @@ export default function DeadCrossSettingsPage({ environment }: { environment: En
         strategies: { ...current.strategies, deadCross: { ...currentStrategy, [market]: updatedMarket } },
       } as StrategySettingsDocument
       if (!validateDeadCrossSettings(market, updatedMarket)) {
-        try { localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next)) } catch {
+        try {
+          localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next))
+          void saveServerStrategySettings(next).catch((error: unknown) => { setMessage(error instanceof Error ? error.message : '서버에 전략 설정을 저장하지 못했습니다.'); setMessageIsError(true) })
+        } catch {
           setMessage('브라우저에 설정을 저장하지 못했습니다.')
           setMessageIsError(true)
         }
@@ -43,8 +60,9 @@ export default function DeadCrossSettingsPage({ environment }: { environment: En
     setMessage('')
   }
 
-  const persistWholeDocument = (next: StrategySettingsDocument, successMessage: string) => {
+  const persistWholeDocument = async (next: StrategySettingsDocument, successMessage: string) => {
     try {
+      await saveServerStrategySettings(next)
       localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next))
       setDocument(next)
       setMessage(successMessage)
@@ -64,7 +82,7 @@ export default function DeadCrossSettingsPage({ environment }: { environment: En
   const importSettings = () => {
     try {
       const next = parseStrategySettings(jsonText)
-      persistWholeDocument(next, '전체 전략 설정을 가져와 저장했습니다.')
+      void persistWholeDocument(next, '전체 전략 설정을 가져와 저장했습니다.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '전략 설정을 가져오지 못했습니다.')
       setMessageIsError(true)
@@ -76,8 +94,10 @@ export default function DeadCrossSettingsPage({ environment }: { environment: En
 
   return <>
     <section className="page-heading strategy-page-heading">
-      <div><div className="eyebrow"><span className="live-dot" />자동매도 전략</div><h1>데드크로스</h1><p>이동평균 데드크로스 전략의 설정 화면입니다. 현재는 설정 인터페이스만 제공하며 주문은 실행되지 않습니다.</p></div>
+      <div><div className="eyebrow"><span className="live-dot" />자동매도 전략</div><h1>데드크로스</h1><p>완료된 차트 봉의 종가를 사용해 단기·장기 단순 이동평균 하향 교차를 감시합니다.</p></div>
     </section>
+
+    <StrategyRuntimeStatus />
 
     <div className="strategy-layout">
       <section className="strategy-card">

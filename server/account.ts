@@ -1,7 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { sellLockKey, withSellLock } from './orderCoordinator.ts'
 
 type Environment = 'domestic-live' | 'overseas-live' | 'domestic-mock' | 'overseas-mock'
-type MockEnvironment = Extract<Environment, `${string}-mock`>
+export type MockEnvironment = Extract<Environment, `${string}-mock`>
 type SecretConfig = { appkey: string; secretkey: string }
 type CachedToken = { value: string; expiresAt: number }
 type StockItem = { code: string; name: string; englishName?: string; market: string; sector?: string; status?: string; isEtf?: boolean }
@@ -47,6 +48,10 @@ const writeExternalApiLog = (entry: ExternalApiLogEntry) => {
   } catch {
     // Logging must never affect the API request.
   }
+}
+
+export class KiwoomRejectedError extends Error {
+  constructor(message: string) { super(message); this.name = 'KiwoomRejectedError' }
 }
 
 const sendJson = (response: ServerResponse, status: number, body: unknown) => {
@@ -103,7 +108,7 @@ const requestKiwoom = async <T>(url: string, init: RequestInit): Promise<T> => {
       body: redactSensitive(data),
     })
     responseLogged = true
-    if (!succeeded) throw new Error(data.return_msg || `키움 API 요청에 실패했습니다. (${response.status})`)
+    if (!succeeded) throw new KiwoomRejectedError(data.return_msg || `키움 API 요청에 실패했습니다. (${response.status})`)
     return data
   } catch (error) {
     if (!responseLogged) {
@@ -138,6 +143,9 @@ const getToken = async (env: NodeJS.ProcessEnv, environment: Environment) => {
   tokenCache.set(environment, { value: data.token, expiresAt })
   return data.token
 }
+
+export const getStrategyToken = (env: NodeJS.ProcessEnv, environment: MockEnvironment) => getToken(env, environment)
+export const invalidateStrategyToken = (environment: MockEnvironment) => tokenCache.delete(environment)
 
 const queryAccount = async (env: NodeJS.ProcessEnv, environment: Environment) => {
   const token = await getToken(env, environment)
@@ -287,6 +295,7 @@ const resolveExchangeCode = async (env: NodeJS.ProcessEnv, environment: Environm
   const stock = (await queryStocks(env, environment)).find((item) => item.code === code)
   return stock ? exchangeCode(stock.market) : null
 }
+export const resolveStrategyExchangeCode = (env: NodeJS.ProcessEnv, environment: MockEnvironment, code: string, market: string) => resolveExchangeCode(env, environment, code, market)
 
 const normalizeNumber = (value: unknown) => Number(String(value ?? '0').split(',').join('').replace(/^\+/, '')) || 0
 const normalizeStockCode = (value: unknown, overseas: boolean) => {
@@ -324,7 +333,7 @@ const getQuote = async (env: NodeJS.ProcessEnv, environment: Environment, code: 
   }
 }
 
-const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
+const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest, beforeSell?: (environment: MockEnvironment, code: string, exchange: string) => Promise<void>) => {
   const environment = body.environment
   if (environment !== 'domestic-mock' && environment !== 'overseas-mock') throw new Error('모의투자 환경에서만 주문할 수 있습니다.')
   const code = String(body.code ?? '').trim().toUpperCase()
@@ -348,6 +357,8 @@ const placeOrder = async (env: NodeJS.ProcessEnv, body: OrderRequest) => {
     const stex_tp = overseas ? await resolveExchangeCode(env, environment, code, String(body.exchange ?? '')) : null
     if (overseas && !stex_tp) throw new Error('이 거래소는 해외 모의투자 주문을 지원하지 않습니다.')
     if (!overseas && !/^\d{6}$/.test(code)) throw new Error('국내 주문은 6자리 종목코드만 지원합니다.')
+
+    if (side === 'sell') await beforeSell?.(environment, code, stex_tp ?? 'KRX')
 
     if (overseas) {
       const decimalPlaces = String(body.price).split('.')[1]?.length ?? 0
@@ -417,7 +428,7 @@ const getOrderStatus = async (env: NodeJS.ProcessEnv, environment: MockEnvironme
 type FilledOrder = { environment: MockEnvironment; code: string; exchange: string; orderNo: string; side: 'buy' | 'sell'; quantity: number; price: number }
 type FillNotificationSink = (fill: FilledOrder) => void | Promise<void>
 
-export const createTradingHandler = (env: NodeJS.ProcessEnv, onFilled?: FillNotificationSink) => {
+export const createTradingHandler = (env: NodeJS.ProcessEnv, onFilled?: FillNotificationSink, beforeManualSell?: (environment: MockEnvironment, code: string, exchange: string) => Promise<void>) => {
   const activeWatchers = new Set<string>()
   const watchOrder = (order: FilledOrder, startedAt = Date.now()) => {
     const key = `${order.environment}:${order.side}:${order.orderNo}`
@@ -453,7 +464,13 @@ export const createTradingHandler = (env: NodeJS.ProcessEnv, onFilled?: FillNoti
       if (body.environment !== 'domestic-mock' && body.environment !== 'overseas-mock') {
         return sendJson(response, 403, { message: '실투자 환경에서는 매수·매도 주문을 실행할 수 없습니다.' })
       }
-      const receipt = await placeOrder(env, body) as { orderNo?: string; name?: string; status?: string; message?: string }
+      const orderEnvironment = body.environment
+      const code = String(body.code ?? '').trim().toUpperCase()
+      const exchange = String(body.exchange ?? '')
+      const place = () => placeOrder(env, body, beforeManualSell)
+      const receipt = await (body.side === 'sell'
+        ? withSellLock(sellLockKey(String(orderEnvironment), exchange, code), place)
+        : place()) as { orderNo?: string; name?: string; status?: string; message?: string }
       if (onFilled && receipt.orderNo) watchOrder({
         environment: body.environment,
         code: String(body.code ?? ''),
@@ -484,6 +501,107 @@ export const createTradingHandler = (env: NodeJS.ProcessEnv, onFilled?: FillNoti
     sendJson(response, 502, { message })
   }
   }
+}
+
+export type StrategyPositionSnapshot = { code: string; exchange: string; quantity: number; availableQuantity: number; averagePrice: number; currentPrice: number }
+
+export async function fetchStrategyPositions(env: NodeJS.ProcessEnv, environment: MockEnvironment): Promise<StrategyPositionSnapshot[]> {
+  const token = await getToken(env, environment)
+  const overseas = isOverseasEnvironment(environment)
+  const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/acnt' : '/api/dostk/acnt'}`, {
+    method: 'POST', headers: { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': overseas ? 'ust21070' : 'kt00018' },
+    body: JSON.stringify(overseas ? { stex_tp: '', stk_cd: '' } : { qry_tp: '1', dmst_stex_tp: 'KRX' }),
+  })
+  const holdings = (overseas ? data.result_list : data.acnt_evlt_remn_indv_tot) as Record<string, unknown>[] | undefined
+  const normalized = (holdings ?? []).map((item) => ({
+    code: normalizeStockCode(String(item.stk_cd ?? ''), overseas),
+    exchange: String(overseas ? item.stex_tp ?? '' : 'KRX'),
+    quantity: normalizeNumber(overseas ? item.poss_qty : item.rmnd_qty),
+    availableQuantity: normalizeNumber(overseas ? item.sell_alowq : item.trde_able_qty),
+    averagePrice: normalizeNumber(overseas ? item.frgn_stk_book_uv : item.pur_pric),
+    currentPrice: normalizeNumber(overseas ? item.now_pric : item.cur_prc),
+  })).filter((position) => position.code && position.quantity > 0)
+  if (!overseas) return normalized
+  return Promise.all(normalized.map(async (position) => ({
+    ...position,
+    exchange: await resolveExchangeCode(env, environment, position.code, position.exchange) ?? '',
+  })))
+}
+
+export async function fetchStrategyBars(env: NodeJS.ProcessEnv, environment: MockEnvironment, code: string, exchange: string, barType: string, interval: number | null, count: number) {
+  const token = await getToken(env, environment)
+  const overseas = isOverseasEnvironment(environment)
+  let endpoint: string
+  let apiId: string
+  let body: Record<string, string>
+  const marketTimeZone = overseas ? 'America/New_York' : 'Asia/Seoul'
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: marketTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).replaceAll('-', '')
+  if (overseas) {
+    const marketCode = exchange === 'NASDAQ' ? 'ND' : exchange === 'NYSE' ? 'NY' : exchange === 'AMEX' ? 'NA' : exchange
+    endpoint = `${MOCK_DOMAIN}/api/us/chart`
+    apiId = barType === 'day' ? 'usa06012' : barType === 'week' ? 'usa06013' : barType === 'month' ? 'usa06014' : barType === 'minute' ? 'usa06011' : 'usa06010'
+    const lookbackDays = barType === 'month' ? count * 40 : barType === 'week' ? count * 10 : barType === 'day' ? count * 3 : 30
+    const startDate = new Date(`${today.slice(0, 4)}-${today.slice(4, 6)}-${today.slice(6, 8)}T12:00:00Z`)
+    startDate.setUTCDate(startDate.getUTCDate() - lookbackDays)
+    const start = startDate.toISOString().slice(0, 10).replaceAll('-', '')
+    body = { stex_tp: marketCode, stk_cd: code, strt_dt: start, tic_scope: String(interval ?? ''), upd_stkpc_tp: '0', exrt_appl_tp: '0' }
+  } else {
+    endpoint = `${MOCK_DOMAIN}/api/dostk/chart`
+    apiId = barType === 'tick' ? 'ka10079' : barType === 'minute' ? 'ka10080' : barType === 'day' ? 'ka10081' : barType === 'week' ? 'ka10082' : 'ka10083'
+    body = { stk_cd: code, upd_stkpc_tp: '1' }
+    if (barType === 'tick' || barType === 'minute') body.tic_scope = String(interval ?? '')
+    if (barType !== 'tick') body.base_dt = today
+  }
+  const data = await requestKiwoom<Record<string, unknown>>(endpoint, {
+    method: 'POST', headers: { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': apiId }, body: JSON.stringify(body),
+  })
+  const rows = (data.result_list ?? data.stk_tic_chart_qry ?? data.stk_min_pole_chart_qry ?? data.stk_dt_pole_chart_qry ?? data.stk_stk_pole_chart_qry ?? data.stk_mth_pole_chart_qry) as Record<string, unknown>[] | undefined
+  return (rows ?? []).map((bar) => ({ key: String(bar.cntr_tm ?? bar.dt ?? bar.bus_dt ?? ''), close: Math.abs(normalizeNumber(bar.cur_prc)) }))
+    .filter((bar) => bar.key && bar.close > 0)
+    .sort((left, right) => right.key.localeCompare(left.key))
+    .slice(0, Math.max(count + 2, count * 2))
+}
+
+export async function fetchStrategyOpenSells(env: NodeJS.ProcessEnv, environment: MockEnvironment, code: string) {
+  const token = await getToken(env, environment)
+  const overseas = isOverseasEnvironment(environment)
+  const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/acnt' : '/api/dostk/acnt'}`, {
+    method: 'POST', headers: { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': overseas ? 'ust21150' : 'kt00007' },
+    body: JSON.stringify(overseas ? { ord_dt: '', query_tp: '3', slby_tp: '1', stex_tp: '', stk_cd: code, oppo_trde_tp: '', fr_ord_no: '' } : { ord_dt: '', qry_tp: '3', stk_bond_tp: '1', sell_tp: '1', stk_cd: code, fr_ord_no: '', dmst_stex_tp: '%' }),
+  })
+  const rows = ((overseas ? data.result_list ?? data.result_lsit : data.acnt_ord_cntr_prps_dtl) as Record<string, unknown>[] | undefined) ?? []
+  return rows.filter((item) => normalizeNumber(item.ord_remnq) > 0 && (overseas ? item.slby_tp_nm === '매도' || item.slby_tp === '1' : item.io_tp_nm === '현금매도' || item.io_tp_nm === '융자매도'))
+}
+
+export async function fetchStrategyOrders(env: NodeJS.ProcessEnv, environment: MockEnvironment, code: string) {
+  const token = await getToken(env, environment)
+  const overseas = isOverseasEnvironment(environment)
+  const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/acnt' : '/api/dostk/acnt'}`, {
+    method: 'POST', headers: { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': overseas ? 'ust21150' : 'kt00007' },
+    body: JSON.stringify(overseas
+      ? { ord_dt: '', query_tp: '1', slby_tp: '1', stex_tp: '', stk_cd: code, oppo_trde_tp: '', fr_ord_no: '' }
+      : { ord_dt: '', qry_tp: '1', stk_bond_tp: '1', sell_tp: '1', stk_cd: code, fr_ord_no: '', dmst_stex_tp: '%' }),
+  })
+  const rows = ((overseas ? data.result_list ?? data.result_lsit : data.acnt_ord_cntr_prps_dtl) as Record<string, unknown>[] | undefined) ?? []
+  return rows.filter((item) => {
+    const rowCode = normalizeStockCode(String(item.stk_cd ?? ''), overseas)
+    const isSell = overseas ? item.slby_tp_nm === '매도' || item.slby_tp === '1' : item.io_tp_nm === '현금매도' || item.io_tp_nm === '융자매도'
+    return rowCode === normalizeStockCode(code, overseas) && isSell
+  })
+}
+
+export async function submitStrategyMarketSell(env: NodeJS.ProcessEnv, environment: MockEnvironment, code: string, exchange: string, quantity: number) {
+  const token = await getToken(env, environment)
+  const overseas = isOverseasEnvironment(environment)
+  const data = await requestKiwoom<Record<string, unknown>>(`${MOCK_DOMAIN}${overseas ? '/api/us/ordr' : '/api/dostk/ordr'}`, {
+    method: 'POST', headers: { 'content-type': 'application/json;charset=UTF-8', authorization: `Bearer ${token}`, 'api-id': overseas ? 'ust20001' : 'kt10001' },
+    body: JSON.stringify(overseas
+      ? { stex_tp: exchange, stk_cd: code, ord_qty: String(quantity), ord_uv: '', stop_pric: '', trde_tp: '03' }
+      : { dmst_stex_tp: 'KRX', stk_cd: code, ord_qty: String(quantity), ord_uv: '', trde_tp: '3', cond_uv: '' }),
+  })
+  const orderNo = String(data.ord_no ?? '')
+  if (!orderNo) throw new Error('키움이 주문번호를 반환하지 않았습니다. 주문 결과를 확인할 때까지 중복 방지 잠금을 유지합니다.')
+  return orderNo
 }
 
 type RankingKind = 'value' | 'gainers' | 'volume' | 'popular'

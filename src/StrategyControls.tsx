@@ -15,7 +15,7 @@ export function MarketTabs({ market, environment, onChange }: { market: Strategy
 }
 
 export function StrategyToggle({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
-  return <label className="strategy-enabled-toggle"><span><b>기능 사용</b><small>{checked ? '설정 켜짐 · 주문 동작은 아직 연결되지 않았습니다.' : '설정 꺼짐'}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>
+  return <label className="strategy-enabled-toggle"><span><b>기능 사용</b><small>{checked ? '모의 계좌에서 전략 조건을 감시합니다.' : '설정 꺼짐'}</small></span><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /></label>
 }
 
 export function StrategyTimeRange({ market, startTime, endTime, onChange }: {

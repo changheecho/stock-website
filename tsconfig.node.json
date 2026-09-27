@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "target": "ES2022",
     "composite": true,
     "skipLibCheck": true,
     "module": "ESNext",
@@ -9,5 +10,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["vite.config.ts", "server"]
+  "include": ["vite.config.ts", "server", "src/strategySettings.ts", "src/types.ts"]
 }

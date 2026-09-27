@@ -7,6 +7,8 @@ import {
   type StrategyMarket, type StrategySettingsDocument, type TrailingStopMarketSettings,
 } from './strategySettings'
 import type { Environment, StockSearchItem } from './types'
+import { saveServerStrategySettings } from './api'
+import StrategyRuntimeStatus from './StrategyRuntimeStatus'
 
 export default function TrailingStopSettingsPage({ environment }: { environment: Environment }) {
   const [market, setMarket] = useState<StrategyMarket>(environment.startsWith('overseas-') ? 'overseas' : 'domestic')
@@ -18,6 +20,18 @@ export default function TrailingStopSettingsPage({ environment }: { environment:
   const settings = document.strategies.trailingStop[market]
   const validationError = validateTrailingStopSettings(market, settings)
   const hours = MARKET_TRADING_HOURS[market]
+
+  useEffect(() => {
+    let active = true
+    void fetch('/api/strategies/settings').then(async (response) => {
+      const data = await response.json() as { configured?: boolean; settings?: StrategySettingsDocument; message?: string }
+      if (!response.ok) throw new Error(data.message || '서버 전략 설정을 불러오지 못했습니다.')
+      let next = data.settings ?? loadStrategySettings(localStorage.getItem(STRATEGY_SETTINGS_STORAGE_KEY))
+      if (!data.configured) { next = loadStrategySettings(localStorage.getItem(STRATEGY_SETTINGS_STORAGE_KEY)); await saveServerStrategySettings(next) }
+      if (active) { setDocument(next); localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next)) }
+    }).catch((error: unknown) => { if (active) { setMessage(error instanceof Error ? error.message : '서버 전략 설정을 불러오지 못했습니다.'); setMessageIsError(true) } })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (environment === 'domestic-mock') setMarket('domestic')
@@ -33,7 +47,10 @@ export default function TrailingStopSettingsPage({ environment }: { environment:
         strategies: { ...current.strategies, trailingStop: { ...currentStrategy, [market]: updatedMarket } },
       } as StrategySettingsDocument
       if (!validateTrailingStopSettings(market, updatedMarket)) {
-        try { localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next)) } catch {
+        try {
+          localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next))
+          void saveServerStrategySettings(next).catch((error: unknown) => { setMessage(error instanceof Error ? error.message : '서버에 전략 설정을 저장하지 못했습니다.'); setMessageIsError(true) })
+        } catch {
           setMessage('브라우저에 설정을 저장하지 못했습니다.')
           setMessageIsError(true)
         }
@@ -43,8 +60,9 @@ export default function TrailingStopSettingsPage({ environment }: { environment:
     setMessage('')
   }
 
-  const persistWholeDocument = (next: StrategySettingsDocument, successMessage: string) => {
+  const persistWholeDocument = async (next: StrategySettingsDocument, successMessage: string) => {
     try {
+      await saveServerStrategySettings(next)
       localStorage.setItem(STRATEGY_SETTINGS_STORAGE_KEY, serializeStrategySettings(next))
       setDocument(next)
       setMessage(successMessage)
@@ -64,7 +82,7 @@ export default function TrailingStopSettingsPage({ environment }: { environment:
   const importSettings = () => {
     try {
       const next = parseStrategySettings(jsonText)
-      persistWholeDocument(next, '전체 전략 설정을 가져와 저장했습니다.')
+      void persistWholeDocument(next, '전체 전략 설정을 가져와 저장했습니다.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '전략 설정을 가져오지 못했습니다.')
       setMessageIsError(true)
@@ -73,8 +91,10 @@ export default function TrailingStopSettingsPage({ environment }: { environment:
 
   return <>
     <section className="page-heading strategy-page-heading">
-      <div><div className="eyebrow"><span className="live-dot" />자동매도 전략</div><h1>트레일링 스탑</h1><p>수익 보호 전략의 설정 화면입니다. 현재는 설정 인터페이스만 제공하며 주문은 실행되지 않습니다.</p></div>
+      <div><div className="eyebrow"><span className="live-dot" />자동매도 전략</div><h1>트레일링 스탑</h1><p>평균 매입가로 활성화하고, 매수 후 최고가에서 설정한 비율만큼 하락하면 매도합니다.</p></div>
     </section>
+
+    <StrategyRuntimeStatus />
 
     <div className="strategy-layout">
       <section className="strategy-card">

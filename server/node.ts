@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile, stat } from 'node:fs/promises'
 import { extname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createAuthMiddleware } from './auth.ts'
+import { createStrategyHandler, StrategyRuntime } from './strategyRuntime.ts'
 import { createTelegramSettingsHandler, notifyFill, notifyLogin } from './telegram.ts'
 import {
   createAccountHandler,
@@ -47,12 +48,19 @@ setExternalApiLogSink(async (entry) => {
   }
 })
 
+const strategyRuntime = new StrategyRuntime({ env: process.env, dataDirectory: process.env.STRATEGY_DATA_DIR, tradingEnabled: process.env.ENABLE_AUTOMATED_MOCK_ORDERS === 'true' })
+strategyRuntime.start()
 const handlers = {
   account: createAccountHandler(process.env),
   rankings: createRankingHandler(process.env),
   search: createStockSearchHandler(process.env),
-  trading: createTradingHandler(process.env, (fill) => notifyFill(process.env, fill)),
+  trading: createTradingHandler(
+    process.env,
+    (fill) => notifyFill(process.env, fill),
+    (environment, code, exchange) => strategyRuntime.beforeManualSell(environment, code, exchange),
+  ),
   telegramSettings: createTelegramSettingsHandler(process.env),
+  strategies: createStrategyHandler(strategyRuntime),
 }
 const authenticate = createAuthMiddleware(process.env.PASSWORD, undefined, () => notifyLogin(process.env))
 
@@ -104,6 +112,10 @@ const server = createServer(async (request, response) => {
     if (url.pathname === '/api/stocks/search') return handlers.search(request, response)
     if (url.pathname === '/api/rankings') return handlers.rankings(request, response)
     if (url.pathname === '/api/settings/telegram') return handlers.telegramSettings(request, response)
+    if (url.pathname.startsWith('/api/strategies/')) {
+      request.url = `${url.pathname.slice('/api/strategies'.length)}${url.search}`
+      return handlers.strategies(request, response)
+    }
     if (url.pathname.startsWith('/api/trade/')) {
       request.url = `${url.pathname.slice('/api/trade'.length)}${url.search}`
       return handlers.trading(request, response)
@@ -129,6 +141,7 @@ server.listen(port, host, () => {
 
 const shutdown = (signal: NodeJS.Signals) => {
   console.log(`Received ${signal}; shutting down`)
+  strategyRuntime.stop()
   server.close((error) => {
     if (error) {
       console.error(error)

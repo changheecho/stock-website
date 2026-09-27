@@ -103,5 +103,11 @@ export const fetchOrderStatus = (environment: Environment, stock: StockSearchIte
   return apiJson<OrderStatus>(`/api/trade/order-status?${params}`)
 }
 
+export async function saveServerStrategySettings(settings: unknown) {
+  return apiJson<{ settings: unknown }>('/api/strategies/settings', {
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ settings }),
+  })
+}
+
 export const fetchRankings = (environment: Environment) =>
   apiJson<RankingsData>(`/api/rankings?${new URLSearchParams({ environment })}`)

@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { LoaderCircle, Plus, Search, Trash2 } from 'lucide-react'
 import { searchStocks } from './api'
-import { MARKET_TRADING_HOURS, type StrategyMarket } from './strategySettings'
+import { CHART_BAR_OPTIONS, MARKET_TRADING_HOURS, type ChartBarType, type StrategyMarket } from './strategySettings'
 import type { Environment, StockSearchItem } from './types'
 
 export function MarketTabs({ market, environment, onChange }: { market: StrategyMarket; environment: Environment; onChange: (market: StrategyMarket) => void }) {
@@ -26,6 +26,20 @@ export function StrategyTimeRange({ market, startTime, endTime, onChange }: {
     <label>시작시간<input type="time" min={hours.start} max={hours.end} step={60} value={startTime} onChange={(event) => onChange('startTime', event.target.value)} /></label>
     <span aria-hidden="true">~</span>
     <label>종료시간<input type="time" min={hours.start} max={hours.end} step={60} value={endTime} onChange={(event) => onChange('endTime', event.target.value)} /></label>
+  </div>
+}
+
+export function ChartPeriodSettings({ market, barType, barInterval, onChange }: {
+  market: StrategyMarket; barType: ChartBarType; barInterval: number | null; onChange: (type: ChartBarType, interval: number | null) => void
+}) {
+  const options = CHART_BAR_OPTIONS[market]
+  const selectedOption = options.find((option) => option.type === barType) ?? options[0]
+  return <div className="chart-period-settings">
+    <label>봉 종류<select value={selectedOption.type} onChange={(event) => {
+      const selected = options.find((option) => option.type === event.target.value) ?? options[0]
+      onChange(selected.type, selected.intervals?.[0] ?? null)
+    }}>{options.map((option) => <option key={option.type} value={option.type}>{option.label}</option>)}</select></label>
+    {selectedOption.intervals && <label>{barType === 'minute' ? '분 단위' : '틱 단위'}<select value={barInterval ?? ''} onChange={(event) => onChange(barType, Number(event.target.value))}>{selectedOption.intervals.map((interval) => <option key={interval} value={interval}>{interval}{barType === 'minute' ? '분' : '틱'}</option>)}</select></label>}
   </div>
 }
 

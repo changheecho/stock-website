@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  createDefaultStrategySettings, loadStrategySettings, parseStrategySettings, serializeStrategySettings, validateMarketSettings, validateTrailingStopSettings,
+  CHART_BAR_OPTIONS, createDefaultStrategySettings, loadStrategySettings, parseStrategySettings, serializeStrategySettings,
+  validateDeadCrossSettings, validateMarketSettings, validateTrailingStopSettings,
 } from './strategySettings.ts'
 
 test('default SL/TP settings are disabled and use each market regular session', () => {
@@ -52,4 +53,21 @@ test('older strategy JSON gains default trailing stop values when imported', () 
   const oldDocument = { schemaVersion: 1, strategies: { stopLossTakeProfit: settings.strategies.stopLossTakeProfit } }
   const imported = parseStrategySettings(JSON.stringify(oldDocument))
   assert.equal(imported.strategies.trailingStop.overseas.startTime, '09:30')
+  assert.equal(imported.strategies.deadCross.domestic.barInterval, 5)
+})
+
+test('chart choices include documented domestic scopes and omit unspecified US tick/minute scopes', () => {
+  assert.deepEqual(CHART_BAR_OPTIONS.domestic.find((item) => item.type === 'tick')?.intervals, [1, 3, 5, 10, 30])
+  assert.deepEqual(CHART_BAR_OPTIONS.domestic.find((item) => item.type === 'minute')?.intervals, [1, 3, 5, 10, 15, 30, 45, 60])
+  assert.deepEqual(CHART_BAR_OPTIONS.overseas.map((item) => item.type), ['day', 'week', 'month'])
+})
+
+test('dead-cross periods require valid documented intervals, positive integer bar counts, and short below long', () => {
+  const defaults = createDefaultStrategySettings().strategies.deadCross
+  assert.equal(validateDeadCrossSettings('domestic', defaults.domestic), null)
+  assert.match(validateDeadCrossSettings('domestic', { ...defaults.domestic, barInterval: 2 }) ?? '', /명세/)
+  assert.match(validateDeadCrossSettings('domestic', { ...defaults.domestic, shortMAPeriod: 20, longMAPeriod: 20 }) ?? '', /단기/)
+  assert.match(validateDeadCrossSettings('overseas', { ...defaults.overseas, barType: 'minute', barInterval: 1 }) ?? '', /명세/)
+  assert.match(validateDeadCrossSettings('domestic', { ...defaults.domestic, longMAPeriod: 20 }, 19) ?? '', /완료봉 19개/)
+  assert.equal(validateDeadCrossSettings('domestic', { ...defaults.domestic, longMAPeriod: 20 }, 20), null)
 })

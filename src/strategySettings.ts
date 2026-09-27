@@ -9,11 +9,19 @@ export type StrategyMarketCommonSettings = {
 }
 export type StrategyMarketSettings = StrategyMarketCommonSettings & { takeProfitPercent: number; stopLossPercent: number }
 export type TrailingStopMarketSettings = StrategyMarketCommonSettings & { activationProfitPercent: number; drawdownPercent: number }
+export type ChartBarType = 'tick' | 'minute' | 'day' | 'week' | 'month'
+export type DeadCrossMarketSettings = StrategyMarketCommonSettings & {
+  barType: ChartBarType
+  barInterval: number | null
+  shortMAPeriod: number
+  longMAPeriod: number
+}
 export type StrategySettingsDocument = {
   schemaVersion: 1
   strategies: {
     stopLossTakeProfit: Record<StrategyMarket, StrategyMarketSettings>
     trailingStop: Record<StrategyMarket, TrailingStopMarketSettings>
+    deadCross: Record<StrategyMarket, DeadCrossMarketSettings>
     [strategyId: string]: unknown
   }
 }
@@ -22,6 +30,22 @@ export const STRATEGY_SETTINGS_STORAGE_KEY = 'portfolio-desk.strategy-settings.v
 export const MARKET_TRADING_HOURS: Record<StrategyMarket, { start: string; end: string; timeZone: string; label: string }> = {
   domestic: { start: '09:00', end: '15:30', timeZone: 'Asia/Seoul', label: '국내 정규장' },
   overseas: { start: '09:30', end: '16:00', timeZone: 'America/New_York', label: '미국 정규장' },
+}
+
+export const CHART_BAR_OPTIONS: Record<StrategyMarket, { type: ChartBarType; label: string; intervals?: number[] }[]> = {
+  domestic: [
+    { type: 'tick', label: '틱봉', intervals: [1, 3, 5, 10, 30] },
+    { type: 'minute', label: '분봉', intervals: [1, 3, 5, 10, 15, 30, 45, 60] },
+    { type: 'day', label: '일봉' },
+    { type: 'week', label: '주봉' },
+    { type: 'month', label: '월봉' },
+  ],
+  // The US chart specs describe minute/tick TRs but do not enumerate accepted tic_scope values.
+  overseas: [
+    { type: 'day', label: '일봉' },
+    { type: 'week', label: '주봉' },
+    { type: 'month', label: '월봉' },
+  ],
 }
 
 export const createDefaultStrategySettings = (): StrategySettingsDocument => ({
@@ -34,6 +58,10 @@ export const createDefaultStrategySettings = (): StrategySettingsDocument => ({
     trailingStop: {
       domestic: { enabled: false, startTime: '09:00', endTime: '15:30', activationProfitPercent: 3, drawdownPercent: 1.5, excludedStocks: [] },
       overseas: { enabled: false, startTime: '09:30', endTime: '16:00', activationProfitPercent: 3, drawdownPercent: 1.5, excludedStocks: [] },
+    },
+    deadCross: {
+      domestic: { enabled: false, startTime: '09:00', endTime: '15:30', barType: 'minute', barInterval: 5, shortMAPeriod: 5, longMAPeriod: 20, excludedStocks: [] },
+      overseas: { enabled: false, startTime: '09:30', endTime: '16:00', barType: 'day', barInterval: null, shortMAPeriod: 5, longMAPeriod: 20, excludedStocks: [] },
     },
   },
 })
@@ -67,6 +95,27 @@ export const validateTrailingStopSettings = (market: StrategyMarket, settings: T
   return null
 }
 
+export const validateDeadCrossSettings = (market: StrategyMarket, settings: DeadCrossMarketSettings, availableClosedBars?: number) => {
+  const windowError = validateMarketWindow(market, settings)
+  if (windowError) return windowError
+  const option = CHART_BAR_OPTIONS[market].find((item) => item.type === settings.barType)
+  if (!option) return '선택한 시장에서 명세로 확인된 봉 주기가 아닙니다.'
+  if (option.intervals) {
+    if (!Number.isInteger(settings.barInterval) || !option.intervals.includes(settings.barInterval as number)) {
+      const unit = settings.barType === 'minute' ? '분' : '틱'
+      return `명세에 기재된 ${unit} 단위 중에서 선택해 주세요.`
+    }
+  } else if (settings.barInterval !== null) return '일·주·월 봉 주기에는 별도 간격을 지정하지 않습니다.'
+  if (![settings.shortMAPeriod, settings.longMAPeriod].every((value) => Number.isSafeInteger(value) && value >= 1)) {
+    return '이동평균 기간은 1 이상의 정수 봉 개수로 입력해 주세요.'
+  }
+  if (settings.shortMAPeriod >= settings.longMAPeriod) return '단기 이동평균 기간은 장기 이동평균 기간보다 작아야 합니다.'
+  if (availableClosedBars !== undefined && settings.longMAPeriod > availableClosedBars) {
+    return `장기 이동평균 기간은 조회된 완료봉 ${availableClosedBars}개 이하여야 합니다.`
+  }
+  return null
+}
+
 const isStockSearchItem = (value: unknown): value is StockSearchItem => {
   if (!value || typeof value !== 'object') return false
   const item = value as Partial<StockSearchItem>
@@ -91,6 +140,16 @@ const isTrailingStopSettings = (market: StrategyMarket, value: unknown): value i
   return validateTrailingStopSettings(market, settings as TrailingStopMarketSettings) === null
 }
 
+const isDeadCrossSettings = (market: StrategyMarket, value: unknown): value is DeadCrossMarketSettings => {
+  if (!value || typeof value !== 'object') return false
+  const settings = value as Partial<DeadCrossMarketSettings>
+  if (typeof settings.enabled !== 'boolean' || typeof settings.startTime !== 'string' || typeof settings.endTime !== 'string'
+    || typeof settings.barType !== 'string' || (settings.barInterval !== null && typeof settings.barInterval !== 'number')
+    || typeof settings.shortMAPeriod !== 'number' || typeof settings.longMAPeriod !== 'number'
+    || !Array.isArray(settings.excludedStocks) || !settings.excludedStocks.every(isStockSearchItem)) return false
+  return validateDeadCrossSettings(market, settings as DeadCrossMarketSettings) === null
+}
+
 export const parseStrategySettings = (text: string): StrategySettingsDocument => {
   let parsed: unknown
   try { parsed = JSON.parse(text) } catch { throw new Error('JSON 형식이 올바르지 않습니다.') }
@@ -102,6 +161,7 @@ export const parseStrategySettings = (text: string): StrategySettingsDocument =>
   const strategies = document.strategies as Record<string, unknown>
   const stopLossTakeProfit = strategies.stopLossTakeProfit
   const trailingStop = strategies.trailingStop
+  const deadCross = strategies.deadCross
   if (!stopLossTakeProfit || typeof stopLossTakeProfit !== 'object') throw new Error('SL / TP 설정이 없습니다.')
   const settings = stopLossTakeProfit as Record<string, unknown>
   if (!isMarketSettings('domestic', settings.domestic) || !isMarketSettings('overseas', settings.overseas)) {
@@ -117,7 +177,17 @@ export const parseStrategySettings = (text: string): StrategySettingsDocument =>
     }
     normalizedTrailingStop = { domestic: trailing.domestic, overseas: trailing.overseas }
   }
-  return { schemaVersion: 1, strategies: { ...strategies, stopLossTakeProfit: { domestic: settings.domestic, overseas: settings.overseas }, trailingStop: normalizedTrailingStop } }
+  const defaultDeadCross = createDefaultStrategySettings().strategies.deadCross
+  let normalizedDeadCross = defaultDeadCross
+  if (deadCross !== undefined) {
+    if (!deadCross || typeof deadCross !== 'object') throw new Error('데드크로스 설정 형식이 올바르지 않습니다.')
+    const deadCrossMarket = deadCross as Record<string, unknown>
+    if (!isDeadCrossSettings('domestic', deadCrossMarket.domestic) || !isDeadCrossSettings('overseas', deadCrossMarket.overseas)) {
+      throw new Error('국내·해외 데드크로스 설정 값이나 봉 주기가 올바르지 않습니다.')
+    }
+    normalizedDeadCross = { domestic: deadCrossMarket.domestic, overseas: deadCrossMarket.overseas }
+  }
+  return { schemaVersion: 1, strategies: { ...strategies, stopLossTakeProfit: { domestic: settings.domestic, overseas: settings.overseas }, trailingStop: normalizedTrailingStop, deadCross: normalizedDeadCross } }
 }
 
 export const loadStrategySettings = (value: string | null) => {

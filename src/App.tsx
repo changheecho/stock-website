@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, BriefcaseBusiness, ChevronRight,
-  Activity, Bell, CircleDollarSign, Clock3, ListOrdered, LogOut, Menu, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Star, WalletCards, X,
+  Activity, Bell, CircleDollarSign, Clock3, LineChart, ListOrdered, LogOut, Menu, RefreshCw, Search, ShieldCheck, SlidersHorizontal, Star, WalletCards, X,
 } from 'lucide-react'
 import { fetchAccount } from './api'
 import StockSearch from './StockSearch'
@@ -14,6 +14,7 @@ import HoldingsTable from './HoldingsTable'
 import NotificationSettings from './NotificationSettings'
 import StrategySettingsPage from './StrategySettingsPage'
 import TrailingStopSettingsPage from './TrailingStopSettingsPage'
+import DeadCrossSettingsPage from './DeadCrossSettingsPage'
 import type { AccountView, Environment, Feature, Holding, StockSearchItem, TradeSelection } from './types'
 
 const environments: { id: Environment; label: string; detail: string }[] = [
@@ -102,11 +103,12 @@ function App() {
         <button className={feature === 'notifications' ? 'active' : ''} onClick={() => setFeature('notifications')}><Bell size={19} /><span>알림 설정</span><ChevronRight size={16} /></button>
         <button className={feature === 'strategy' ? 'active' : ''} onClick={() => setFeature('strategy')}><SlidersHorizontal size={19} /><span>SL / TP</span><ChevronRight size={16} /></button>
         <button className={feature === 'trailing-stop' ? 'active' : ''} onClick={() => setFeature('trailing-stop')}><Activity size={19} /><span>트레일링 스탑</span><ChevronRight size={16} /></button>
+        <button className={feature === 'dead-cross' ? 'active' : ''} onClick={() => setFeature('dead-cross')}><LineChart size={19} /><span>데드크로스</span><ChevronRight size={16} /></button>
       </nav>
       <div className="security-note"><ShieldCheck size={20} /><div><b>보안 연결</b><span>인증정보는 서버에서만 사용됩니다.</span></div></div>
     </aside>
 
-    <main>{feature === 'trailing-stop' ? <TrailingStopSettingsPage environment={environment} /> : feature === 'strategy' ? <StrategySettingsPage environment={environment} /> : feature === 'notifications' ? <NotificationSettings /> : feature === 'stock-search' ? <StockSearch environment={environment} onSelectStock={openBuy} isWatchlisted={watchlist.contains} onToggleWatchlist={watchlist.toggle} /> : feature === 'rankings' ? <Rankings environment={environment} onSelectStock={openBuy} isWatchlisted={watchlist.contains} onToggleWatchlist={watchlist.toggle} /> : feature === 'watchlist' ? <WatchlistPage stocks={watchlist.stocks} onToggle={watchlist.toggle} onSelectStock={openBuy} /> : <>
+    <main>{feature === 'dead-cross' ? <DeadCrossSettingsPage environment={environment} /> : feature === 'trailing-stop' ? <TrailingStopSettingsPage environment={environment} /> : feature === 'strategy' ? <StrategySettingsPage environment={environment} /> : feature === 'notifications' ? <NotificationSettings /> : feature === 'stock-search' ? <StockSearch environment={environment} onSelectStock={openBuy} isWatchlisted={watchlist.contains} onToggleWatchlist={watchlist.toggle} /> : feature === 'rankings' ? <Rankings environment={environment} onSelectStock={openBuy} isWatchlisted={watchlist.contains} onToggleWatchlist={watchlist.toggle} /> : feature === 'watchlist' ? <WatchlistPage stocks={watchlist.stocks} onToggle={watchlist.toggle} onSelectStock={openBuy} /> : <>
       <section className="page-heading">
         <div><div className="eyebrow"><span className="live-dot" />{selected.label} · {selected.detail}</div><h1>계좌 확인</h1><p>보유 자산과 수익 현황을 한눈에 확인하세요.</p></div>
         <button className="refresh-button" onClick={() => query.refetch()} disabled={query.isFetching}><RefreshCw size={17} className={query.isFetching ? 'spin' : ''} />{query.isFetching ? '업데이트 중' : '새로고침'}</button>

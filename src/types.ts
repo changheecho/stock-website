@@ -1,6 +1,6 @@
 export type Environment = 'domestic-live' | 'overseas-live' | 'domestic-mock' | 'overseas-mock'
 export type MockEnvironment = Extract<Environment, `${string}-mock`>
-export type Feature = 'account' | 'stock-search' | 'rankings' | 'watchlist' | 'notifications' | 'strategy' | 'trailing-stop'
+export type Feature = 'account' | 'stock-search' | 'rankings' | 'watchlist' | 'notifications' | 'strategy' | 'trailing-stop' | 'dead-cross'
 export type TradeSide = 'buy' | 'sell'
 export type TradeSelection = { stock: StockSearchItem; side: TradeSide; availableQuantity?: number }
 

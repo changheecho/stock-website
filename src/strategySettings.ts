@@ -1,18 +1,19 @@
 import type { StockSearchItem } from './types'
 
 export type StrategyMarket = 'domestic' | 'overseas'
-export type StrategyMarketSettings = {
+export type StrategyMarketCommonSettings = {
   enabled: boolean
   startTime: string
   endTime: string
-  takeProfitPercent: number
-  stopLossPercent: number
   excludedStocks: StockSearchItem[]
 }
+export type StrategyMarketSettings = StrategyMarketCommonSettings & { takeProfitPercent: number; stopLossPercent: number }
+export type TrailingStopMarketSettings = StrategyMarketCommonSettings & { activationProfitPercent: number; drawdownPercent: number }
 export type StrategySettingsDocument = {
   schemaVersion: 1
   strategies: {
     stopLossTakeProfit: Record<StrategyMarket, StrategyMarketSettings>
+    trailingStop: Record<StrategyMarket, TrailingStopMarketSettings>
     [strategyId: string]: unknown
   }
 }
@@ -30,10 +31,14 @@ export const createDefaultStrategySettings = (): StrategySettingsDocument => ({
       domestic: { enabled: false, startTime: '09:00', endTime: '15:30', takeProfitPercent: 5, stopLossPercent: 3, excludedStocks: [] },
       overseas: { enabled: false, startTime: '09:30', endTime: '16:00', takeProfitPercent: 5, stopLossPercent: 3, excludedStocks: [] },
     },
+    trailingStop: {
+      domestic: { enabled: false, startTime: '09:00', endTime: '15:30', activationProfitPercent: 3, drawdownPercent: 1.5, excludedStocks: [] },
+      overseas: { enabled: false, startTime: '09:30', endTime: '16:00', activationProfitPercent: 3, drawdownPercent: 1.5, excludedStocks: [] },
+    },
   },
 })
 
-export const validateMarketSettings = (market: StrategyMarket, settings: StrategyMarketSettings) => {
+const validateMarketWindow = (market: StrategyMarket, settings: Pick<StrategyMarketCommonSettings, 'startTime' | 'endTime'>) => {
   const hours = MARKET_TRADING_HOURS[market]
   const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/
   if (!timePattern.test(settings.startTime) || !timePattern.test(settings.endTime)) return '시간을 올바르게 입력해 주세요.'
@@ -41,8 +46,23 @@ export const validateMarketSettings = (market: StrategyMarket, settings: Strateg
     return `${hours.label} 시간(${hours.start}–${hours.end}) 안에서 설정해 주세요.`
   }
   if (settings.startTime >= settings.endTime) return '시작시간은 종료시간보다 앞서야 합니다.'
+  return null
+}
+
+export const validateMarketSettings = (market: StrategyMarket, settings: StrategyMarketSettings) => {
+  const windowError = validateMarketWindow(market, settings)
+  if (windowError) return windowError
   if (![settings.takeProfitPercent, settings.stopLossPercent].every((value) => Number.isFinite(value) && value > 0 && value <= 100)) {
     return '익절·손절 기준은 0보다 크고 100 이하로 입력해 주세요.'
+  }
+  return null
+}
+
+export const validateTrailingStopSettings = (market: StrategyMarket, settings: TrailingStopMarketSettings) => {
+  const windowError = validateMarketWindow(market, settings)
+  if (windowError) return windowError
+  if (![settings.activationProfitPercent, settings.drawdownPercent].every((value) => Number.isFinite(value) && value > 0 && value <= 100)) {
+    return '활성화 수익률과 고점 대비 하락률은 0보다 크고 100 이하로 입력해 주세요.'
   }
   return null
 }
@@ -62,6 +82,15 @@ const isMarketSettings = (market: StrategyMarket, value: unknown): value is Stra
   return validateMarketSettings(market, settings as StrategyMarketSettings) === null
 }
 
+const isTrailingStopSettings = (market: StrategyMarket, value: unknown): value is TrailingStopMarketSettings => {
+  if (!value || typeof value !== 'object') return false
+  const settings = value as Partial<TrailingStopMarketSettings>
+  if (typeof settings.enabled !== 'boolean' || typeof settings.startTime !== 'string' || typeof settings.endTime !== 'string'
+    || typeof settings.activationProfitPercent !== 'number' || typeof settings.drawdownPercent !== 'number'
+    || !Array.isArray(settings.excludedStocks) || !settings.excludedStocks.every(isStockSearchItem)) return false
+  return validateTrailingStopSettings(market, settings as TrailingStopMarketSettings) === null
+}
+
 export const parseStrategySettings = (text: string): StrategySettingsDocument => {
   let parsed: unknown
   try { parsed = JSON.parse(text) } catch { throw new Error('JSON 형식이 올바르지 않습니다.') }
@@ -72,12 +101,23 @@ export const parseStrategySettings = (text: string): StrategySettingsDocument =>
   }
   const strategies = document.strategies as Record<string, unknown>
   const stopLossTakeProfit = strategies.stopLossTakeProfit
+  const trailingStop = strategies.trailingStop
   if (!stopLossTakeProfit || typeof stopLossTakeProfit !== 'object') throw new Error('SL / TP 설정이 없습니다.')
   const settings = stopLossTakeProfit as Record<string, unknown>
   if (!isMarketSettings('domestic', settings.domestic) || !isMarketSettings('overseas', settings.overseas)) {
     throw new Error('국내·해외 SL / TP 설정 값이나 정규장 시간이 올바르지 않습니다.')
   }
-  return { schemaVersion: 1, strategies: { ...strategies, stopLossTakeProfit: { domestic: settings.domestic, overseas: settings.overseas } } }
+  const defaults = createDefaultStrategySettings().strategies.trailingStop
+  let normalizedTrailingStop = defaults
+  if (trailingStop !== undefined) {
+    if (!trailingStop || typeof trailingStop !== 'object') throw new Error('트레일링 스탑 설정 형식이 올바르지 않습니다.')
+    const trailing = trailingStop as Record<string, unknown>
+    if (!isTrailingStopSettings('domestic', trailing.domestic) || !isTrailingStopSettings('overseas', trailing.overseas)) {
+      throw new Error('국내·해외 트레일링 스탑 설정 값이나 정규장 시간이 올바르지 않습니다.')
+    }
+    normalizedTrailingStop = { domestic: trailing.domestic, overseas: trailing.overseas }
+  }
+  return { schemaVersion: 1, strategies: { ...strategies, stopLossTakeProfit: { domestic: settings.domestic, overseas: settings.overseas }, trailingStop: normalizedTrailingStop } }
 }
 
 export const loadStrategySettings = (value: string | null) => {

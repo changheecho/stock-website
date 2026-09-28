@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Download, FileInput, LineChart } from 'lucide-react'
+import { AlertTriangle, Copy, Download, FileInput, LineChart } from 'lucide-react'
 import { ChartPeriodSettings, ExcludedStocks, MarketTabs, StrategyTimeRange, StrategyToggle } from './StrategyControls'
 import {
   loadStrategySettings, marketCurrentTime, MARKET_TRADING_HOURS,
@@ -79,6 +79,19 @@ export default function DeadCrossSettingsPage({ environment }: { environment: En
     setMessageIsError(false)
   }
 
+  const copySettings = async () => {
+    const text = serializeStrategySettings(document)
+    setJsonText(text)
+    try {
+      await navigator.clipboard.writeText(text)
+      setMessage('전체 전략 설정 JSON을 복사했습니다. 다른 환경의 설정 화면에 붙여넣으세요.')
+      setMessageIsError(false)
+    } catch {
+      setMessage('클립보드에 복사하지 못했습니다. 아래 JSON을 선택해 직접 복사해 주세요.')
+      setMessageIsError(true)
+    }
+  }
+
   const importSettings = () => {
     try {
       const next = parseStrategySettings(jsonText)
@@ -133,8 +146,8 @@ export default function DeadCrossSettingsPage({ environment }: { environment: En
 
       <section className="strategy-card strategy-transfer-card">
         <div className="strategy-card-header"><div><FileInput size={19} /><div><h2>전체 전략 설정 백업</h2><p>SL / TP, 트레일링 스탑, 데드크로스를 한 JSON 문서로 관리합니다.</p></div></div></div>
-        <div className="strategy-transfer-actions"><button type="button" onClick={exportSettings}><Download size={15} />전체 설정 내보내기</button><button type="button" onClick={importSettings} disabled={!jsonText.trim()}>텍스트 가져오기</button></div>
-        <label className="strategy-json-label">전략 설정 JSON<textarea value={jsonText} onChange={(event) => setJsonText(event.target.value)} placeholder="내보내기를 누르면 전체 설정 JSON이 표시됩니다. JSON을 붙여넣어 가져올 수도 있습니다." spellCheck={false} /></label>
+        <div className="strategy-transfer-actions"><button type="button" onClick={exportSettings}><Download size={15} />전체 설정 내보내기</button><button type="button" onClick={() => void copySettings()}><Copy size={15} />JSON 복사</button><button type="button" onClick={importSettings} disabled={!jsonText.trim()}>텍스트 가져오기</button></div>
+        <label className="strategy-json-label">전략 설정 JSON<textarea value={jsonText} onChange={(event) => setJsonText(event.target.value)} placeholder="JSON 복사 버튼으로 전체 설정을 복사하거나, 다른 환경에서 복사한 설정을 여기에 붙여넣으세요." spellCheck={false} /></label>
         <p className={messageIsError ? 'strategy-transfer-message error' : 'strategy-transfer-message'} role="status">{message}</p>
       </section>
     </div>
